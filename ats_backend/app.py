@@ -215,59 +215,42 @@ def get_candidates():
 
 # --------------------------------------------------------
 
-@app.route("/create-users-table", methods=["GET"])
-
-def create_users_table():
-
+@app.route("/create-candidates-table", methods=["GET"])
+def create_candidates_table():
     try:
-
         conn = get_db_connection()
-
         cursor = conn.cursor()
 
+        # Check if the 'candidates' table exists
+        cursor.execute("SHOW TABLES LIKE 'candidates'")
+        result = cursor.fetchone()
 
-
-        cursor.execute("""
-
-            CREATE TABLE IF NOT EXISTS users (
-
-                id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-
-                name VARCHAR(100) NOT NULL,
-
-                email VARCHAR(150) NOT NULL UNIQUE,
-
-                password_hash VARCHAR(255) NOT NULL,
-
-                role ENUM('ADMIN','DELIVERY_MANAGER','TEAM_LEAD','RECRUITER','CLIENT','CANDIDATE') DEFAULT 'RECRUITER',
-
-                phone VARCHAR(20) DEFAULT NULL,
-
-                status VARCHAR(20) DEFAULT 'ACTIVE',
-
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
-            )
-
-        """)
-
-
-
-        conn.commit()
+        if result:
+            message = "✅ Table 'candidates' already exists."
+        else:
+            cursor.execute("""
+                CREATE TABLE candidates (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    email VARCHAR(100) NOT NULL,
+                    phone VARCHAR(20),
+                    skills TEXT,
+                    education TEXT,
+                    experience TEXT,
+                    resume_filename VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+            message = "✅ Table 'candidates' created successfully."
 
         cursor.close()
-
         conn.close()
-
-
-
-        return jsonify({"message": "✅ 'users' table created (or already exists)."}), 200
-
-
+        return jsonify({"message": message}), 200
 
     except Exception as e:
-
-        return jsonify({"error": str(e)}), 500
+        print("❌ Error creating candidates table:", e)
+        return jsonify({"message": str(e)}), 500
 
 @app.route("/update-candidate/<int:id>", methods=["PUT"])
 def update_candidate(id):
