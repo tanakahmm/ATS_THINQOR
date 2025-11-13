@@ -723,6 +723,7 @@ def assign_requirement():
         requirement_id = data.get("requirement_id")
         recruiter_id = data.get("recruiter_id")
         assigned_by = data.get("assigned_by")
+        status = data.get("status", "ASSIGNED")
 
         if not all([requirement_id, recruiter_id, assigned_by]):
             return jsonify({"error": "Missing required fields"}), 400
@@ -776,9 +777,69 @@ def assign_requirement():
         cursor.execute("""
             INSERT INTO requirement_allocations (id, requirement_id, recruiter_id, assigned_by, status)
             VALUES (%s, %s, %s, %s, %s)
-        """, (alloc_id, requirement_id, recruiter_id, assigned_by, data.get("status", "ASSIGNED")))
-
+        """, (alloc_id, requirement_id, recruiter_id, assigned_by, status))
         conn.commit()
+
+        # ---------- NEW PART: build payload for n8n ----------
+
+        # Fetch recruiter info (id, name, email)
+        cursor.execute(
+            "SELECT id, name, email FROM users WHERE id = %s",
+            (recruiter_id,),
+        )
+        recruiter_row = cursor.fetchone()
+        recruiter_id_val = recruiter_row[0] if recruiter_row else None
+        recruiter_name = recruiter_row[1] if recruiter_row else None
+        recruiter_email = recruiter_row[2] if recruiter_row else None
+
+        # Fetch assigner info (who assigned)
+        cursor.execute(
+            "SELECT id, name, email FROM users WHERE id = %s",
+            (assigned_by,),
+        )
+        assigner_row = cursor.fetchone()
+        assigned_by_id = assigner_row[0] if assigner_row else None
+        assigned_by_name = assigner_row[1] if assigner_row else None
+        assigned_by_email = assigner_row[2] if assigner_row else None
+
+        # Fetch requirement info (id, title, client_id)
+        cursor.execute(
+            "SELECT id, title, client_id FROM requirements WHERE id = %s",
+            (requirement_id,),
+        )
+        req_row = cursor.fetchone()
+        req_id_val = req_row[0] if req_row else None
+        req_title = req_row[1] if req_row else None
+        client_id_val = req_row[2] if req_row else None
+
+        # Fetch client name (optional)
+        client_name = None
+        if client_id_val:
+            cursor.execute("SELECT name FROM clients WHERE id = %s", (client_id_val,))
+            client_row = cursor.fetchone()
+            if client_row:
+                client_name = client_row[0]
+
+        # Send event to n8n (safe even if some fields are None)
+        payload = {
+            "allocation_id": alloc_id,
+            "requirement_id": req_id_val,
+            "requirement_title": req_title,
+            "client_id": client_id_val,
+            "client_name": client_name,
+            "recruiter_id": recruiter_id_val,
+            "recruiter_name": recruiter_name,
+            "recruiter_email": recruiter_email,
+            "assigned_by_id": assigned_by_id,
+            "assigned_by_name": assigned_by_name,
+            "assigned_by_email": assigned_by_email,
+            "status": status,
+        }
+
+        notify_event("requirement_assigned", payload)
+
+        # ---------- END NEW PART ----------
+
         cursor.close()
         conn.close()
 
@@ -789,7 +850,6 @@ def assign_requirement():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/requirements/<string:req_id>/allocations", methods=["GET"])
 def get_requirement_allocations(req_id):
