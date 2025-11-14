@@ -159,20 +159,34 @@ export default function Requirements() {
   };
 
   // Confirm delete
-  const handleDeleteConfirm = () => {
-    const updatedList = requirements.filter(
-      (item) => item.id !== reqToDelete.id
-    );
-
-    dispatch({
-      type: "auth/setRequirements",
-      payload: updatedList,
-    });
-
-    setShowDeleteModal(false);
-    setReqToDelete(null);
+  const handleDeleteConfirm = async () => {
+    try {
+      const res = await fetch(`http://localhost:5000/delete-requirement/${reqToDelete.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+  
+      const data = await res.json();
+  
+      if (res.ok) {
+        alert("Requirement deleted successfully!");
+  
+        dispatch({
+          type: "auth/setRequirements",
+          payload: requirements.filter((item) => item.id !== reqToDelete.id),
+        });
+  
+        setShowDeleteModal(false);
+        setReqToDelete(null);
+      } else {
+        alert(data.error || "Failed to delete requirement");
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      alert("Server error. Try again later.");
+    }
   };
-
   return (
     <div className="max-w-7xl mx-auto p-6">
       {/* Header */}

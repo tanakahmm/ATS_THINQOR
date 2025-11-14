@@ -895,6 +895,51 @@ def get_requirements():
 
     return jsonify(data)
 
+
+# -----------------------------
+#  Delete Requirement
+# -----------------------------
+@app.route('/delete-requirement/<req_id>', methods=['DELETE', 'OPTIONS'])
+def delete_requirement(req_id):
+
+    # Handle CORS preflight
+    if request.method == "OPTIONS":
+        return '', 200
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Check if requirement exists
+        cursor.execute("SELECT id FROM requirements WHERE id = %s", (req_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"error": "Requirement not found"}), 404
+
+        # Delete allocations related to this requirement
+        cursor.execute(
+            "DELETE FROM requirement_allocations WHERE requirement_id = %s",
+            (req_id,)
+        )
+
+        # Delete requirement
+        cursor.execute(
+            "DELETE FROM requirements WHERE id = %s",
+            (req_id,)
+        )
+
+        conn.commit()
+
+        return jsonify({"message": "Requirement deleted successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route('/create-client', methods=['POST'])
 def create_client():
     data = request.get_json()
