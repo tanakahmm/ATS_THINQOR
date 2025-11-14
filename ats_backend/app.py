@@ -157,6 +157,7 @@ def submit_candidate():
         skills = request.form.get("skills")
         education = request.form.get("education")
         experience = request.form.get("experience")
+        created_by = request.form.get("created_by", type=int)  # Get created_by from form
         resume = request.files.get("resume")  # file
 
         if not all([name, email]):
@@ -176,11 +177,19 @@ def submit_candidate():
             return jsonify({"message": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO candidates
-            (name, email, phone, skills, education, experience, resume_filename)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-        """, (name, email, phone, skills, education, experience, filename))
+        # Include created_by in INSERT if provided
+        if created_by:
+            cursor.execute("""
+                INSERT INTO candidates
+                (name, email, phone, skills, education, experience, resume_filename, created_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (name, email, phone, skills, education, experience, filename, created_by))
+        else:
+            cursor.execute("""
+                INSERT INTO candidates
+                (name, email, phone, skills, education, experience, resume_filename)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """, (name, email, phone, skills, education, experience, filename))
 
         conn.commit()
         cursor.close()
@@ -198,18 +207,23 @@ def get_candidates():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # ✅ Ensure correct database
+        # ------------------------------------------------
+        # 1️⃣ Ensure correct database
+        # ------------------------------------------------
         cursor.execute("SELECT DATABASE()")
         db_row = cursor.fetchone()
         print("🟢 Current DB check:", db_row)
 
         db_name = db_row.get("DATABASE()") if db_row else None
+
         if not db_name or db_name.lower() != "ats_system":
             print("⚠ Switching to ats_system database...")
             cursor.execute("USE ats_system")
             conn.commit()
 
-        # ✅ Create table if missing
+        # ------------------------------------------------
+        # 2️⃣ Create table if it does NOT exist
+        # ------------------------------------------------
         cursor.execute("SHOW TABLES LIKE 'candidates'")
         if not cursor.fetchone():
             print("⚠ 'candidates' table not found — creating now...")
@@ -223,26 +237,70 @@ def get_candidates():
                     education TEXT,
                     experience TEXT,
                     resume_filename VARCHAR(255),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_by INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by) REFERENCES users(id)
                 )
             """)
             conn.commit()
             print("✅ 'candidates' table created successfully!")
 
-        # ✅ Fetch candidates
-        cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+        # ------------------------------------------------
+        # 3️⃣ Check if created_by column exists — if not, ADD it
+        # ------------------------------------------------
+        cursor.execute("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = 'ats_system'
+            AND TABLE_NAME = 'candidates'
+            AND COLUMN_NAME = 'created_by'
+        """)
+
+        if not cursor.fetchone():
+            print("⚠ 'created_by' column missing — adding now...")
+            cursor.execute("""
+                ALTER TABLE candidates 
+                ADD COLUMN created_by INT DEFAULT NULL,
+                ADD FOREIGN KEY (created_by) REFERENCES users(id)
+            """)
+            conn.commit()
+            print("✅ Added 'created_by' column!")
+
+        # ------------------------------------------------
+        # 4️⃣ Fetch candidates with role-based filtering
+        # ------------------------------------------------
+        # Get user info from query params
+        user_id = request.args.get("user_id", type=int)
+        user_role = request.args.get("user_role", "").upper()
+        
+        # Build query based on role
+        if user_role == "RECRUITER" and user_id:
+            # Recruiters only see their own candidates
+            cursor.execute(
+                "SELECT * FROM candidates WHERE created_by = %s ORDER BY id DESC",
+                (user_id,)
+            )
+            print(f"🔍 Filtering candidates for RECRUITER (user_id={user_id})")
+        elif user_role in ["ADMIN", "DELIVERY_MANAGER"]:
+            # Admin and DM see all candidates
+            cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+            print(f"🔍 Showing all candidates for {user_role}")
+        else:
+            # Default: show all (for backward compatibility or guest access)
+            cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+            print("🔍 Showing all candidates (no role filter)")
+        
         rows = cursor.fetchall()
         print(f"✅ Found {len(rows)} candidates")
 
         cursor.close()
         conn.close()
+
         return jsonify(rows), 200
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print("❌ Error fetching candidates:", e)
-        return jsonify({"message": str(e)}), 500
+        print("❌ Error:", str(e))
+        return jsonify({"error": str(e)}), 500
 # --------------------------------------------------------
 
 # Create users table if it doesn't exist

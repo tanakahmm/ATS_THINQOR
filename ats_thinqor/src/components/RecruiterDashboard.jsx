@@ -61,7 +61,12 @@ export default function RecruiterDashboard() {
   const loadCandidates = async () => {
     try {
       setLoadingCandidates(true);
-      const res = await fetch("http://localhost:5000/get-candidates");
+      // Pass user info to filter candidates by role
+      const params = new URLSearchParams({
+        user_id: user?.id || "",
+        user_role: user?.role || "",
+      });
+      const res = await fetch(`http://localhost:5000/get-candidates?${params.toString()}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         setCandidates(data);
