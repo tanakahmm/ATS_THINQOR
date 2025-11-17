@@ -1356,15 +1356,36 @@ def add_user():
 def update_user(id):
     try:
         data = request.json
-        name = data.get("name")
-        email = data.get("email")
-        phone = data.get("phone")
-        role = data.get("role")
-        status = data.get("status")
         password = data.get("password")  # optional
 
         conn = get_db_connection()
-        cursor = conn.cursor()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT name, email, phone, role, COALESCE(status,'ACTIVE') AS status FROM users WHERE id=%s",
+            (id,)
+        )
+        existing = cursor.fetchone()
+        if not existing:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "User not found"}), 404
+
+        name = data.get("name", existing["name"])
+        email = data.get("email", existing["email"])
+        phone = data.get("phone", existing["phone"])
+        role = data.get("role", existing["role"])
+        status = data.get("status", existing["status"] or "ACTIVE")
+
+        # basic validation
+        if not all([name, email]):
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Name and email are required"}), 400
+
+        update_values = [name, email, phone, role, status, id]
 
         if password:
             password_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -1375,7 +1396,7 @@ def update_user(id):
         else:
             cursor.execute(
                 "UPDATE users SET name=%s, email=%s, phone=%s, role=%s, status=%s WHERE id=%s",
-                (name, email, phone, role, status, id)
+                update_values
             )
 
         conn.commit()
