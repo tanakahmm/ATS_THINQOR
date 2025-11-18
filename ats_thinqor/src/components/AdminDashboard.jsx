@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { getUsers, createUser, clearMessages } from "../auth/authSlice";
 
+/* ---------------------- Small UI Components ---------------------- */
+
 function StatCard({ title, value, subtitle }) {
   return (
     <div className="bg-white rounded-2xl shadow p-5">
@@ -32,15 +34,23 @@ function RolePill({ role }) {
     CLIENT: "bg-gray-100 text-gray-800",
   };
   return (
-    <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${map[role] || "bg-gray-100 text-gray-700"}`}>
+    <span
+      className={`px-2 py-1 rounded-lg text-xs font-semibold ${
+        map[role] || "bg-gray-100 text-gray-700"
+      }`}
+    >
       {role}
     </span>
   );
 }
 
+/* ---------------------- MAIN COMPONENT ---------------------- */
+
 export default function AdminDashboard() {
   const dispatch = useDispatch();
-  const { usersList, loading, error, successMessage, user: currentUser } = useSelector((s) => s.auth);
+  const { usersList, loading, error, successMessage } = useSelector(
+    (s) => s.auth
+  );
 
   const [openCreate, setOpenCreate] = useState(false);
   const [form, setForm] = useState({
@@ -51,12 +61,12 @@ export default function AdminDashboard() {
     password: "",
   });
 
-  // fetch users on mount
+  /* ---------------- Fetch users on mount ---------------- */
   useEffect(() => {
     dispatch(getUsers());
   }, [dispatch]);
 
-  // auto-clear toasts
+  /* ---------------- Auto clear messages ---------------- */
   useEffect(() => {
     if (error || successMessage) {
       const t = setTimeout(() => dispatch(clearMessages()), 2500);
@@ -64,34 +74,60 @@ export default function AdminDashboard() {
     }
   }, [error, successMessage, dispatch]);
 
+  /* ---------------- Stats ---------------- */
   const stats = useMemo(() => {
     const total = usersList?.length || 0;
-    const active = usersList?.filter(u => u.status === "ACTIVE").length || 0;
-    const byRole = (role) => usersList?.filter(u => u.role === role).length || 0;
-    return { total, active, admins: byRole("ADMIN"), recruiters: byRole("RECRUITER") };
+    const active = usersList?.filter((u) => u.status === "ACTIVE").length || 0;
+    const byRole = (role) =>
+      usersList?.filter((u) => u.role === role).length || 0;
+
+    return {
+      total,
+      active,
+      admins: byRole("ADMIN"),
+      recruiters: byRole("RECRUITER"),
+    };
   }, [usersList]);
 
+  /* ---------------- Top 5 users ---------------- */
   const top5 = useMemo(() => (usersList || []).slice(0, 5), [usersList]);
 
+  /* ---------------- Create User Handler ---------------- */
   const handleCreate = (e) => {
     e.preventDefault();
     dispatch(createUser(form)).then((res) => {
       if (res.meta.requestStatus === "fulfilled") {
-        setForm({ name: "", email: "", phone: "", role: "RECRUITER", password: "" });
+        setForm({
+          name: "",
+          email: "",
+          phone: "",
+          role: "RECRUITER",
+          password: "",
+        });
         setOpenCreate(false);
         dispatch(getUsers());
       }
     });
   };
 
+  /* ---------------- ROLE DISTRIBUTION DATA ---------------- */
+  const roles = [
+    { key: "ADMIN", label: "Admin", color: "bg-purple-500" },
+    { key: "DELIVERY_MANAGER", label: "Delivery Manager", color: "bg-amber-500" },
+    { key: "TEAM_LEAD", label: "Team Lead", color: "bg-blue-500" },
+    { key: "RECRUITER", label: "Recruiter", color: "bg-emerald-500" },
+    { key: "CLIENT", label: "Client", color: "bg-gray-500" },
+  ];
+
+  const totalUsers = usersList?.length || 0;
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+      {/* ---------------- Header ---------------- */}
       <header className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Admin Dashboard</h1>
-          </div>
+          <h1 className="text-2xl font-bold text-gray-800">Admin Dashboard</h1>
+
           <div className="flex gap-3">
             <QuickAction label="Create User" onClick={() => setOpenCreate(true)} />
             <a
@@ -104,7 +140,7 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      {/* Content */}
+      {/* ---------------- Content ---------------- */}
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
         {/* Toasts */}
         {error && (
@@ -118,44 +154,55 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* KPI cards */}
+        {/* KPI CARDS */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Total Users" value={stats.total} subtitle="All users created by Admin" />
-          <StatCard title="Active Users" value={stats.active} subtitle="Status: ACTIVE" />
-          <StatCard title="Admins" value={stats.admins} subtitle="Role count" />
-          <StatCard title="Recruiters" value={stats.recruiters} subtitle="Role count" />
+          <StatCard title="Total Users" value={stats.total} />
+          <StatCard title="Active Users" value={stats.active} />
+          <StatCard title="Admins" value={stats.admins} />
+          <StatCard title="Recruiters" value={stats.recruiters} />
         </section>
 
-        {/* Role distribution bar (simple CSS chart) */}
+        {/* ---------------- ROLE DISTRIBUTION BAR ---------------- */}
         <section className="bg-white rounded-2xl shadow p-5">
           <h2 className="text-lg font-semibold mb-2">Role Distribution</h2>
-          <div className="w-full h-3 bg-gray-100 rounded-xl overflow-hidden">
-            {(() => {
-              const total = stats.total || 1;
-              const counts = ["ADMIN","DELIVERY_MANAGER","TEAM_LEAD","RECRUITER","CLIENT"].map(
-                r => (usersList?.filter(u => u.role === r).length || 0)
-              );
-              const colors = ["bg-purple-500","bg-amber-500","bg-blue-500","bg-emerald-500","bg-gray-500"];
-              return counts.map((c, i) => (
+
+          <div className="w-full h-3 bg-gray-100 rounded-xl overflow-hidden flex">
+            {roles.map((r) => {
+              const count =
+                usersList?.filter((u) => u.role === r.key).length || 0;
+              const percent = (count / totalUsers) * 100;
+
+              return (
                 <div
-                  key={i}
-                  className={`${colors[i]} h-3`}
-                  style={{ width: `${(c / total) * 100}%` }}
-                  title={`${c}`}
+                  key={r.key}
+                  // 🐛 FIX 1: Added missing backticks for template literal
+                  className={`${r.color} h-3`}
+                  style={{
+                    // 🐛 FIX 2: Added missing backticks for template literal
+                    width: percent > 0 ? `${percent}%` : "0%",
+                  }}
+                  // 🐛 FIX 3: Added missing backticks for template literal
+                  title={`${r.label}: ${count}`}
                 />
-              ));
-            })()}
+              );
+            })}
           </div>
+
+          {/* Legend */}
           <div className="flex flex-wrap gap-3 mt-3 text-sm text-gray-600">
-            <span><span className="inline-block w-3 h-3 bg-purple-500 mr-1 rounded-sm" /> Admin</span>
-            <span><span className="inline-block w-3 h-3 bg-amber-500 mr-1 rounded-sm" /> Delivery Manager</span>
-            <span><span className="inline-block w-3 h-3 bg-blue-500 mr-1 rounded-sm" /> Team Lead</span>
-            <span><span className="inline-block w-3 h-3 bg-emerald-500 mr-1 rounded-sm" /> Recruiter</span>
-            <span><span className="inline-block w-3 h-3 bg-gray-500 mr-1 rounded-sm" /> Client</span>
+            {roles.map((r) => (
+              <span key={r.key}>
+                <span
+                  // 🐛 FIX 4: Added missing backticks for template literal
+                  className={`inline-block w-3 h-3 ${r.color} mr-1 rounded-sm`}
+                />
+                {r.label}
+              </span>
+            ))}
           </div>
         </section>
 
-        {/* Users preview table */}
+        {/* ---------------- USERS TABLE ---------------- */}
         <section className="bg-white rounded-2xl shadow p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Recent Users</h2>
@@ -168,38 +215,73 @@ export default function AdminDashboard() {
             <table className="min-w-full border border-gray-200 rounded-xl">
               <thead className="bg-gray-100">
                 <tr>
-                  <th className="px-4 py-2 text-left text-sm text-gray-600">Name</th>
-                  <th className="px-4 py-2 text-left text-sm text-gray-600">Email</th>
-                  <th className="px-4 py-2 text-left text-sm text-gray-600">Phone</th>
-                  <th className="px-4 py-2 text-left text-sm text-gray-600">Role</th>
-                  <th className="px-4 py-2 text-left text-sm text-gray-600">Status</th>
-                  <th className="px-4 py-2 text-left text-sm text-gray-600">Created</th>
+                  <th className="px-4 py-2 text-left text-sm text-gray-600">
+                    Name
+                  </th>
+                  <th className="px-4 py-2 text-left text-sm text-gray-600">
+                    Email
+                  </th>
+                  <th className="px-4 py-2 text-left text-sm text-gray-600">
+                    Phone
+                  </th>
+                  <th className="px-4 py-2 text-left text-sm text-gray-600">
+                    Role
+                  </th>
+                  <th className="px-4 py-2 text-left text-sm text-gray-600">
+                    Status
+                  </th>
+                  <th className="px-4 py-2 text-left text-sm text-gray-600">
+                    Created
+                  </th>
                 </tr>
               </thead>
+
               <tbody>
                 {loading ? (
-                  <tr><td className="px-4 py-5 text-sm text-gray-500" colSpan={6}>Loading…</td></tr>
+                  <tr>
+                    <td
+                      className="px-4 py-5 text-sm text-gray-500"
+                      colSpan={6}
+                    >
+                      Loading…
+                    </td>
+                  </tr>
                 ) : top5.length ? (
                   top5.map((u) => (
                     <tr key={u.id} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-2 text-sm">{u.name}</td>
                       <td className="px-4 py-2 text-sm">{u.email}</td>
                       <td className="px-4 py-2 text-sm">{u.phone || "-"}</td>
-                      <td className="px-4 py-2 text-sm"><RolePill role={u.role} /></td>
                       <td className="px-4 py-2 text-sm">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${
-                          u.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                        }`}>
+                        <RolePill role={u.role} />
+                      </td>
+                      <td className="px-4 py-2 text-sm">
+                        <span
+                          className={`px-2 py-1 rounded-lg text-xs font-semibold ${
+                            u.status === "ACTIVE"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-red-100 text-red-700"
+                          }`}
+                        >
                           {u.status}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-sm">
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}
+                        {u.created_at
+                          ? new Date(u.created_at).toLocaleDateString()
+                          : "-"}
                       </td>
                     </tr>
                   ))
                 ) : (
-                  <tr><td className="px-4 py-5 text-sm text-gray-500" colSpan={6}>No users found</td></tr>
+                  <tr>
+                    <td
+                      className="px-4 py-5 text-sm text-gray-500"
+                      colSpan={6}
+                    >
+                      No users found
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -207,45 +289,61 @@ export default function AdminDashboard() {
         </section>
       </main>
 
-      {/* Create User Modal */}
+      {/* ---------------- Create User Modal ---------------- */}
       {openCreate && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Create User</h3>
-              <button className="text-gray-500 hover:text-gray-700" onClick={() => setOpenCreate(false)}>✕</button>
+              <button
+                className="text-gray-500 hover:text-gray-700"
+                onClick={() => setOpenCreate(false)}
+              >
+                ✕
+              </button>
             </div>
-            <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+            <form
+              onSubmit={handleCreate}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
               <input
                 type="text"
-                name="name"
                 placeholder="Full Name"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, name: e.target.value })
+                }
                 required
                 className="border border-gray-300 rounded-lg px-3 py-2"
               />
+
               <input
                 type="email"
-                name="email"
                 placeholder="Email"
                 value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, email: e.target.value })
+                }
                 required
                 className="border border-gray-300 rounded-lg px-3 py-2"
               />
+
               <input
                 type="text"
-                name="phone"
                 placeholder="Phone"
                 value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, phone: e.target.value })
+                }
                 className="border border-gray-300 rounded-lg px-3 py-2"
               />
+
               <select
-                name="role"
                 value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, role: e.target.value })
+                }
                 className="border border-gray-300 rounded-lg px-3 py-2"
               >
                 <option value="ADMIN">Admin</option>
@@ -254,15 +352,18 @@ export default function AdminDashboard() {
                 <option value="RECRUITER">Recruiter</option>
                 <option value="CLIENT">Client</option>
               </select>
+
               <input
                 type="password"
-                name="password"
                 placeholder="Password"
                 value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, password: e.target.value })
+                }
                 required
                 className="border border-gray-300 rounded-lg px-3 py-2 sm:col-span-2"
               />
+
               <div className="flex gap-3 sm:col-span-2">
                 <button
                   type="submit"

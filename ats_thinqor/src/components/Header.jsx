@@ -1,48 +1,60 @@
-import React, { useState, Fragment } from "react";
+import React, { useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { logoutUser } from "../auth/authSlice";
 
+// --- CSS CLASSES ---
 const baseClasses = "px-3 py-2 rounded-lg text-sm font-medium transition";
 const activeClasses = "bg-indigo-600 text-white";
 const idleClasses = "text-gray-700 hover:bg-gray-100 hover:text-gray-900";
 
-function Header() {
+export default function Header() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useSelector((s) => s.auth);
-  const [open, setOpen] = useState(false);
-
   const role = user?.role || "PUBLIC";
 
-  // ✅ Hide full navbar on login/signup screen, but show center Login/Register
+  // 👇 READ ACTIVE TAB (used when recruiter clicks Create Candidate)
+  // This state is set on the NavLink in the main body
+  const activeTab = location.state?.activeTab;
+
+  // Hide navbar on login/signup
   const isAuthPage = location.pathname === "/" || location.pathname === "/signup";
 
-  // Menu config
+  // -------------------------------
+  // MENU CONFIG BY ROLE
+  // -------------------------------
   const MENUS = {
     ADMIN: [
-      { to: "/admin-dashboard", label: "Dashboard" },
-      { to: "/users", label: "Users" },
-      {to: "/clients", label:"Clients"},
-      { to: "/requirements", label: "Requirements" },
-      { to: "/candidates", label: "Candidates" },
+      { key: "dashboard", to: "/admin-dashboard", label: "Dashboard" },
+      { key: "users", to: "/users", label: "Users" },
+      { key: "clients", to: "/clients", label: "Clients" },
+      { key: "requirements", to: "/requirements", label: "Requirements" },
+      { key: "candidates", to: "/candidates", label: "Candidates" },
       
-      { to: "/interviews", label: "Interviews" },
-      { to: "/offers", label: "Offers" },
-      { to: "/reports", label: "Reports" },
-      { to: "/settings", label: "Settings" },
-      { to: "/create-requirement", label: "Create Requirement" },
+      { key: "interviews", to: "/interviews", label: "Interviews" },
+      { key: "offers", to: "/offers", label: "Offers" },
+      { key: "reports", to: "/reports", label: "Reports" },
+      { key: "settings", to: "/settings", label: "Settings" },
+      { key: "create-requirement", to: "/create-requirement", label: "Create Requirement" },
     ],
+
     DELIVERY_MANAGER: [
-      { to: "/dm-dashboard", label: "Dashboard" },
-      { to: "/requirements", label: "Requirements" },
-      { to: "/create-requirement", label: "Create Requirement" },
-      { to: "/candidates", label: "Candidates" },
+      { key: "dashboard", to: "/dm-dashboard", label: "Dashboard" },
+      { key: "requirements", to: "/requirements", label: "Requirements" },
+      { key: "create-requirement", to: "/create-requirement", label: "Create Requirement" },
+      { key: "candidates", to: "/candidates", label: "Candidates" },
       
-      { to: "/interviews", label: "Interviews" },
-      { to: "/reports", label: "Reports" },
-       // ✅ DM access
+      { key: "interviews", to: "/interviews", label: "Interviews" },
+      { key: "reports", to: "/reports", label: "Reports" },
+    ],
+
+    // 👇 Recruiter Menu
+    RECRUITER: [
+      { key: "dashboard", to: "/recruiter-dashboard", label: "Dashboard" },
+      { key: "candidates", to: "/candidates", label: "Candidates" },
+      { key: "interviews", to: "/interviews", label: "Interviews" },
     ],
   };
 
@@ -52,13 +64,13 @@ function Header() {
     dispatch(logoutUser()).then(() => navigate("/"));
   };
 
-  // ✅ Only show NavBar on dashboards
+  // -----------------------------------
+  // AUTH PAGE HEADER (Login + Register)
+  // -----------------------------------
   if (isAuthPage) {
     return (
       <nav className="bg-white border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
-
-          {/* Brand */}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-indigo-600 rounded-xl text-white flex items-center justify-center font-bold">
               T
@@ -66,15 +78,22 @@ function Header() {
             <span className="text-lg font-bold text-gray-900">Thinqor ATS</span>
           </div>
 
-          {/* ✅ Center Login / Register only */}
           <div className="flex gap-4 absolute left-1/2 -translate-x-1/2">
-            <NavLink to="/" className={({ isActive }) =>
-              `${baseClasses} ${isActive ? activeClasses : idleClasses}`}
+            {/* 🐛 CORRECTION: Corrected string interpolation for NavLink className */}
+            <NavLink
+              to="/"
+              className={({ isActive }) =>
+                `${baseClasses} ${isActive ? activeClasses : idleClasses}`
+              }
             >
               Login
             </NavLink>
-            <NavLink to="/signup" className={({ isActive }) =>
-              `${baseClasses} ${isActive ? activeClasses : idleClasses}`}
+
+            <NavLink
+              to="/signup"
+              className={({ isActive }) =>
+                `${baseClasses} ${isActive ? activeClasses : idleClasses}`
+              }
             >
               Register
             </NavLink>
@@ -84,15 +103,25 @@ function Header() {
     );
   }
 
-  // ✅ Normal navbar after login
+  // -----------------------------------
+  // MAIN NAVBAR AFTER LOGIN
+  // -----------------------------------
   return (
     <nav className="bg-white border-b sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-
         <div className="h-16 flex items-center justify-between">
-          {/* Brand */}
-          <div className="flex items-center gap-2 cursor-pointer"
-            onClick={() => navigate("/admin-dashboard")}
+          {/* Brand Logo (always dashboard by role) */}
+          <div
+            className="flex items-center gap-2 cursor-pointer"
+            onClick={() =>
+              navigate(
+                role === "RECRUITER"
+                  ? "/recruiter-dashboard"
+                  : role === "DELIVERY_MANAGER"
+                  ? "/dm-dashboard"
+                  : "/admin-dashboard"
+              )
+            }
           >
             <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold">
               T
@@ -100,20 +129,33 @@ function Header() {
             <span className="text-lg font-bold text-gray-900">Thinqor ATS</span>
           </div>
 
-          {/* Desktop menu */}
+          {/* MENU ITEMS */}
           <div className="hidden md:flex items-center gap-2">
-            {menuItems.map((item) => (
-              <NavLink key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `${baseClasses} ${isActive ? activeClasses : idleClasses}`}
-              >
-                {item.label}
-              </NavLink>
-            ))}
+            {menuItems.map((item) => {
+              // ⭐ Highlight tab if:
+              // 1. React Router says active
+              // 2. OR activeTab is set from location.state (e.g., when navigating back)
+              const isActive =
+                activeTab === item.key || location.pathname === item.to;
+
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  // Keep active even after refresh/navigation from another page if state is passed
+                  // Note: This state only persists during navigation, not on page reload.
+                  state={{ activeTab: item.key }} 
+                  className={`${baseClasses} ${
+                    isActive ? activeClasses : idleClasses
+                  }`}
+                >
+                  {item.label}
+                </NavLink>
+              );
+            })}
           </div>
 
-          {/* ✅ Logout Only (remove right login/register) */}
+          {/* LOGOUT BUTTON */}
           {user && (
             <button
               onClick={handleLogout}
@@ -127,5 +169,3 @@ function Header() {
     </nav>
   );
 }
-
-export default Header;
