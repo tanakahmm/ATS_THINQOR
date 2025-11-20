@@ -156,6 +156,8 @@ def initialize_database():
                 resume_filename VARCHAR(255),
                 created_by INT,
                 source VARCHAR(50),
+                ctc INT,
+                ectc INT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (created_by) REFERENCES users(id)
             );
