@@ -140,6 +140,33 @@ export const assignRequirement = createAsyncThunk(
   }
 );
 
+
+// --------------------------------------------------------
+// DELETE REQUIREMENT
+// --------------------------------------------------------
+export const deleteRequirement = createAsyncThunk(
+  "auth/deleteRequirement",
+  async (reqId, { rejectWithValue }) => {
+    try {
+      const res = await fetch(`http://localhost:5000/delete-requirement/${reqId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        return rejectWithValue(data.error || "Delete failed");
+      }
+
+      return reqId; // return ID to remove from state
+    } catch (error) {
+      return rejectWithValue(error.message);
+    }
+  }
+);
+
 // ------------------------------------------------------------------
 // CREATE CLIENT (Admin only)
 // ------------------------------------------------------------------
@@ -181,7 +208,7 @@ export const updateClient = createAsyncThunk(
   "clients/updateClient",
   async ({ id, clientData }, { rejectWithValue }) => {
     try {
-      const response = await axios.put(`${API_URL}/update-client/${id}, clientData`);
+      const response = await axios.put(`${API_URL}/update-client/${id}`, clientData);
       return response.data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || "Failed to update client");
@@ -542,6 +569,15 @@ const authSlice = createSlice({
     .addCase(submitCandidate.rejected, (s, a) => {
       s.loading = false;
       s.error = a.payload;
+    })
+
+    .addCase(deleteRequirement.fulfilled, (state, action) => {
+      state.requirements = state.requirements.filter(
+        (req) => req.id !== action.payload
+      );
+    })
+    .addCase(deleteRequirement.rejected, (state, action) => {
+      state.error = action.payload || "Failed to delete requirement";
     })
 
     // UPDATE CANDIDATE

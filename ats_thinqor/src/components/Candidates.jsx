@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from "react";
+import { useSelector } from "react-redux";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 export default function CandidateApplicationUI() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { user } = useSelector((state) => state.auth);
+  
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -14,10 +20,21 @@ export default function CandidateApplicationUI() {
   const [candidates, setCandidates] = useState([]);
   const [editCandidateId, setEditCandidateId] = useState(null);
 
-  // Fetch all candidates from backend
+  // Get recruiterId from query params if coming from recruiter dashboard
+  const recruiterIdFromQuery = searchParams.get("recruiterId");
+  // Use query param recruiterId if available, otherwise use logged-in user id
+  const createdByUserId = recruiterIdFromQuery ? parseInt(recruiterIdFromQuery) : (user?.id || null);
+
+  // Fetch candidates from backend with role-based filtering
   const fetchCandidates = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:5000/get-candidates");
+      // Pass user info to filter candidates by role
+      const params = new URLSearchParams();
+      if (user?.id) {
+        params.append("user_id", user.id);
+        params.append("user_role", user.role || "");
+      }
+      const response = await fetch(`http://localhost:5000/get-candidates?${params.toString()}`);
       const data = await response.json();
       setCandidates(data);
     } catch (error) {
@@ -27,7 +44,7 @@ export default function CandidateApplicationUI() {
 
   useEffect(() => {
     fetchCandidates();
-  }, []);
+  }, [user]);
 
   // Handle input changes
   const handleChange = (e) => {
@@ -46,13 +63,18 @@ export default function CandidateApplicationUI() {
     const data = new FormData();
     Object.entries(formData).forEach(([key, value]) => data.append(key, value));
     if (resume) data.append("resume", resume);
+    
+    // Include created_by if user is a recruiter (only for new submissions, not updates)
+    if (!editCandidateId && createdByUserId) {
+      data.append("created_by", createdByUserId);
+    }
 
     try {
-      let url = "http://127.0.0.1:5000/submit-candidate";
+      let url = "http://localhost:5000/submit-candidate";
       let method = "POST";
 
       if (editCandidateId) {
-        url = `http://127.0.0.1:5000/update-candidate/${editCandidateId}`;
+        url = `http://localhost:5000/update-candidate/${editCandidateId}`;
         method = "PUT";
       }
 
@@ -72,6 +94,12 @@ export default function CandidateApplicationUI() {
         });
         setResume(null);
         setEditCandidateId(null);
+        
+        // Navigate back to recruiter dashboard if came from there
+        const fromState = window.history.state?.usr?.from;
+        if (fromState === "/recruiter-dashboard") {
+          setTimeout(() => navigate("/recruiter-dashboard"), 1500);
+        }
       } else {
         setMessage(`❌ ${result.message || "Failed to submit"}`);
       }
@@ -99,7 +127,7 @@ export default function CandidateApplicationUI() {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this candidate?")) return;
     try {
-      const response = await fetch(`http://127.0.0.1:5000/delete-candidate/${id}`, {
+      const response = await fetch(`http://localhost:5000/delete-candidate/${id}`, {
         method: "DELETE",
       });
       const result = await response.json();

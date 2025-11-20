@@ -42,8 +42,135 @@ db_config = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'root'),
     'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'ats_system')
+    'database': os.getenv('DB_NAME', 'ats')
 }
+
+def initialize_database():
+    """Create tables if they do not exist."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            print("❌ DB connection failed")
+            return
+
+        cursor = conn.cursor()
+
+        # ---------------------------
+        # USERS TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                email VARCHAR(150) NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                role ENUM('ADMIN','DELIVERY_MANAGER','TEAM_LEAD','RECRUITER','CLIENT','CANDIDATE') DEFAULT 'RECRUITER',
+                phone VARCHAR(20),
+                status VARCHAR(20) DEFAULT 'ACTIVE',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ---------------------------
+        # USERSDATA TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usersdata (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100),
+                email VARCHAR(150) UNIQUE,
+                phone VARCHAR(20),
+                role VARCHAR(50),
+                status VARCHAR(20) DEFAULT 'ACTIVE',
+                password_hash VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ---------------------------
+        # CLIENTS TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                contact_person VARCHAR(255),
+                email VARCHAR(255),
+                phone VARCHAR(50),
+                address TEXT,
+                status ENUM('ACTIVE','INACTIVE') DEFAULT 'ACTIVE',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ---------------------------
+        # REQUIREMENTS TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS requirements (
+                id VARCHAR(50) PRIMARY KEY,
+                client_id INT,
+                title VARCHAR(255),
+                description TEXT,
+                location VARCHAR(100),
+                skills_required VARCHAR(255),
+                experience_required FLOAT,
+                ctc_range VARCHAR(100),
+                ecto_range VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'OPEN',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by VARCHAR(100),
+                FOREIGN KEY (client_id) REFERENCES clients(id)
+            );
+        """)
+
+        # ---------------------------
+        # REQUIREMENT_ALLOCATIONS
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS requirement_allocations (
+                id VARCHAR(50) PRIMARY KEY,
+                requirement_id VARCHAR(50),
+                recruiter_id INT,
+                assigned_by INT,
+                status VARCHAR(20) DEFAULT 'ASSIGNED',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (requirement_id) REFERENCES requirements(id),
+                FOREIGN KEY (recruiter_id) REFERENCES users(id),
+                FOREIGN KEY (assigned_by) REFERENCES users(id)
+            );
+        """)
+
+        # ---------------------------
+        # CANDIDATES TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255),
+                email VARCHAR(255),
+                phone VARCHAR(20),
+                skills TEXT,
+                education TEXT,
+                experience TEXT,
+                resume_filename VARCHAR(255),
+                created_by INT,
+                source VARCHAR(50),
+                ctc INT,
+                ectc INT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id)
+            );
+        """)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print("✅ All required tables checked/created successfully")
+
+    except Exception as e:
+        print("❌ Error initializing DB:", e)
 
 # Debug: Print DB config (mask password for security)
 print(f"🔧 DB Config: host={db_config['host']}, user={db_config['user']}, database={db_config['database']}, password={'***' if db_config['password'] else '(empty)'}")
@@ -157,6 +284,7 @@ def submit_candidate():
         skills = request.form.get("skills")
         education = request.form.get("education")
         experience = request.form.get("experience")
+        created_by = request.form.get("created_by", type=int)  # Get created_by from form
         resume = request.files.get("resume")  # file
 
         if not all([name, email]):
@@ -176,11 +304,19 @@ def submit_candidate():
             return jsonify({"message": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO candidates
-            (name, email, phone, skills, education, experience, resume_filename)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-        """, (name, email, phone, skills, education, experience, filename))
+        # Include created_by in INSERT if provided
+        if created_by:
+            cursor.execute("""
+                INSERT INTO candidates
+                (name, email, phone, skills, education, experience, resume_filename, created_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (name, email, phone, skills, education, experience, filename, created_by))
+        else:
+            cursor.execute("""
+                INSERT INTO candidates
+                (name, email, phone, skills, education, experience, resume_filename)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """, (name, email, phone, skills, education, experience, filename))
 
         conn.commit()
         cursor.close()
@@ -198,18 +334,23 @@ def get_candidates():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # ✅ Ensure correct database
+        # ------------------------------------------------
+        # 1️⃣ Ensure correct database
+        # ------------------------------------------------
         cursor.execute("SELECT DATABASE()")
         db_row = cursor.fetchone()
         print("🟢 Current DB check:", db_row)
 
         db_name = db_row.get("DATABASE()") if db_row else None
+
         if not db_name or db_name.lower() != "ats_system":
             print("⚠ Switching to ats_system database...")
             cursor.execute("USE ats_system")
             conn.commit()
 
-        # ✅ Create table if missing
+        # ------------------------------------------------
+        # 2️⃣ Create table if it does NOT exist
+        # ------------------------------------------------
         cursor.execute("SHOW TABLES LIKE 'candidates'")
         if not cursor.fetchone():
             print("⚠ 'candidates' table not found — creating now...")
@@ -223,26 +364,70 @@ def get_candidates():
                     education TEXT,
                     experience TEXT,
                     resume_filename VARCHAR(255),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_by INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by) REFERENCES users(id)
                 )
             """)
             conn.commit()
             print("✅ 'candidates' table created successfully!")
 
-        # ✅ Fetch candidates
-        cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+        # ------------------------------------------------
+        # 3️⃣ Check if created_by column exists — if not, ADD it
+        # ------------------------------------------------
+        cursor.execute("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = 'ats_system'
+            AND TABLE_NAME = 'candidates'
+            AND COLUMN_NAME = 'created_by'
+        """)
+
+        if not cursor.fetchone():
+            print("⚠ 'created_by' column missing — adding now...")
+            cursor.execute("""
+                ALTER TABLE candidates 
+                ADD COLUMN created_by INT DEFAULT NULL,
+                ADD FOREIGN KEY (created_by) REFERENCES users(id)
+            """)
+            conn.commit()
+            print("✅ Added 'created_by' column!")
+
+        # ------------------------------------------------
+        # 4️⃣ Fetch candidates with role-based filtering
+        # ------------------------------------------------
+        # Get user info from query params
+        user_id = request.args.get("user_id", type=int)
+        user_role = request.args.get("user_role", "").upper()
+        
+        # Build query based on role
+        if user_role == "RECRUITER" and user_id:
+            # Recruiters only see their own candidates
+            cursor.execute(
+                "SELECT * FROM candidates WHERE created_by = %s ORDER BY id DESC",
+                (user_id,)
+            )
+            print(f"🔍 Filtering candidates for RECRUITER (user_id={user_id})")
+        elif user_role in ["ADMIN", "DELIVERY_MANAGER"]:
+            # Admin and DM see all candidates
+            cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+            print(f"🔍 Showing all candidates for {user_role}")
+        else:
+            # Default: show all (for backward compatibility or guest access)
+            cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+            print("🔍 Showing all candidates (no role filter)")
+        
         rows = cursor.fetchall()
         print(f"✅ Found {len(rows)} candidates")
 
         cursor.close()
         conn.close()
+
         return jsonify(rows), 200
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print("❌ Error fetching candidates:", e)
-        return jsonify({"message": str(e)}), 500
+        print("❌ Error:", str(e))
+        return jsonify({"error": str(e)}), 500
 # --------------------------------------------------------
 
 # Create users table if it doesn't exist
@@ -385,6 +570,128 @@ def get_users():
         return jsonify(users), 200
     except Exception as e:
         return jsonify({"message": "❌ Error fetching users", "error": str(e)}), 500
+
+
+@app.route('/users/<int:user_id>/details', methods=['GET'])
+def get_user_details(user_id):
+    """
+    Provide a consolidated view of a user's profile, assigned requirements, and owned candidates.
+    This endpoint is intentionally unrestricted so any authorized frontend feature (admin portal, recruiter dashboard,
+    AI assistant, etc.) can fetch rich context for a specific user id.
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor(dictionary=True)
+
+        # ------------------------------------------------
+        # 1️⃣ Base user profile (merge users + usersdata fallbacks)
+        # ------------------------------------------------
+        cursor.execute("""
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                COALESCE(u.phone, ud.phone) AS phone,
+                u.role,
+                COALESCE(u.status, ud.status, 'ACTIVE') AS status,
+                u.created_at
+            FROM users u
+            LEFT JOIN usersdata ud ON ud.email = u.email
+            WHERE u.id = %s
+        """, (user_id,))
+
+        user_row = cursor.fetchone()
+        if not user_row:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "User not found"}), 404
+
+        # ------------------------------------------------
+        # 2️⃣ Requirements assigned to the user (if recruiter)
+        # ------------------------------------------------
+        cursor.execute("""
+            SELECT
+                ra.id AS allocation_id,
+                ra.requirement_id,
+                ra.status AS allocation_status,
+                ra.created_at AS assigned_date,
+                req.title,
+                req.description,
+                req.location,
+                req.skills_required,
+                req.experience_required,
+                req.status AS requirement_status,
+                client.name AS client_name,
+                assigner.name AS assigned_by
+            FROM requirement_allocations ra
+            JOIN requirements req ON req.id = ra.requirement_id
+            LEFT JOIN clients client ON client.id = req.client_id
+            LEFT JOIN users assigner ON assigner.id = ra.assigned_by
+            WHERE ra.recruiter_id = %s
+            ORDER BY ra.created_at DESC
+        """, (user_id,))
+        assigned_requirements = cursor.fetchall()
+
+        # ------------------------------------------------
+        # 3️⃣ Candidates created by the user
+        # ------------------------------------------------
+        cursor.execute("""
+            SELECT
+                id,
+                name,
+                email,
+                phone,
+                skills,
+                education,
+                experience,
+                resume_filename,
+                created_at
+            FROM candidates
+            WHERE created_by = %s
+            ORDER BY created_at DESC
+        """, (user_id,))
+        created_candidates = cursor.fetchall()
+
+        response_payload = {
+            "user": user_row,
+            "assigned_requirements": assigned_requirements,
+            "assigned_requirement_count": len(assigned_requirements),
+            "created_candidates": created_candidates,
+            "created_candidate_count": len(created_candidates),
+        }
+
+        # ------------------------------------------------
+        # 4️⃣ Organization-wide stats for elevated roles
+        # ------------------------------------------------
+        if user_row["role"] in ("ADMIN", "DELIVERY_MANAGER"):
+            org_stats = {}
+
+            cursor.execute("SELECT COUNT(*) AS total_requirements FROM requirements")
+            org_stats["total_requirements"] = cursor.fetchone().get("total_requirements", 0)
+
+            cursor.execute("SELECT COUNT(*) AS open_requirements FROM requirements WHERE status = 'OPEN'")
+            org_stats["open_requirements"] = cursor.fetchone().get("open_requirements", 0)
+
+            cursor.execute("SELECT COUNT(*) AS total_candidates FROM candidates")
+            org_stats["total_candidates"] = cursor.fetchone().get("total_candidates", 0)
+
+            cursor.execute("SELECT COUNT(*) AS total_users FROM users")
+            org_stats["total_users"] = cursor.fetchone().get("total_users", 0)
+
+            cursor.execute("SELECT COUNT(*) AS total_clients FROM clients")
+            org_stats["total_clients"] = cursor.fetchone().get("total_clients", 0)
+
+            response_payload["org_stats"] = org_stats
+
+        cursor.close()
+        conn.close()
+        return jsonify(response_payload), 200
+    except Exception as e:
+        print("❌ Error building user details:", e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -723,6 +1030,7 @@ def assign_requirement():
         requirement_id = data.get("requirement_id")
         recruiter_id = data.get("recruiter_id")
         assigned_by = data.get("assigned_by")
+        status = data.get("status", "ASSIGNED")
 
         if not all([requirement_id, recruiter_id, assigned_by]):
             return jsonify({"error": "Missing required fields"}), 400
@@ -776,9 +1084,69 @@ def assign_requirement():
         cursor.execute("""
             INSERT INTO requirement_allocations (id, requirement_id, recruiter_id, assigned_by, status)
             VALUES (%s, %s, %s, %s, %s)
-        """, (alloc_id, requirement_id, recruiter_id, assigned_by, data.get("status", "ASSIGNED")))
-
+        """, (alloc_id, requirement_id, recruiter_id, assigned_by, status))
         conn.commit()
+
+        # ---------- NEW PART: build payload for n8n ----------
+
+        # Fetch recruiter info (id, name, email)
+        cursor.execute(
+            "SELECT id, name, email FROM users WHERE id = %s",
+            (recruiter_id,),
+        )
+        recruiter_row = cursor.fetchone()
+        recruiter_id_val = recruiter_row[0] if recruiter_row else None
+        recruiter_name = recruiter_row[1] if recruiter_row else None
+        recruiter_email = recruiter_row[2] if recruiter_row else None
+
+        # Fetch assigner info (who assigned)
+        cursor.execute(
+            "SELECT id, name, email FROM users WHERE id = %s",
+            (assigned_by,),
+        )
+        assigner_row = cursor.fetchone()
+        assigned_by_id = assigner_row[0] if assigner_row else None
+        assigned_by_name = assigner_row[1] if assigner_row else None
+        assigned_by_email = assigner_row[2] if assigner_row else None
+
+        # Fetch requirement info (id, title, client_id)
+        cursor.execute(
+            "SELECT id, title, client_id FROM requirements WHERE id = %s",
+            (requirement_id,),
+        )
+        req_row = cursor.fetchone()
+        req_id_val = req_row[0] if req_row else None
+        req_title = req_row[1] if req_row else None
+        client_id_val = req_row[2] if req_row else None
+
+        # Fetch client name (optional)
+        client_name = None
+        if client_id_val:
+            cursor.execute("SELECT name FROM clients WHERE id = %s", (client_id_val,))
+            client_row = cursor.fetchone()
+            if client_row:
+                client_name = client_row[0]
+
+        # Send event to n8n (safe even if some fields are None)
+        payload = {
+            "allocation_id": alloc_id,
+            "requirement_id": req_id_val,
+            "requirement_title": req_title,
+            "client_id": client_id_val,
+            "client_name": client_name,
+            "recruiter_id": recruiter_id_val,
+            "recruiter_name": recruiter_name,
+            "recruiter_email": recruiter_email,
+            "assigned_by_id": assigned_by_id,
+            "assigned_by_name": assigned_by_name,
+            "assigned_by_email": assigned_by_email,
+            "status": status,
+        }
+
+        notify_event("requirement_assigned", payload)
+
+        # ---------- END NEW PART ----------
+
         cursor.close()
         conn.close()
 
@@ -789,7 +1157,6 @@ def assign_requirement():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/requirements/<string:req_id>/allocations", methods=["GET"])
 def get_requirement_allocations(req_id):
@@ -822,6 +1189,49 @@ def get_requirement_allocations(req_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/recruiter/<int:recruiter_id>/requirements", methods=["GET"])
+def get_recruiter_requirements(recruiter_id):
+    """Return all requirement allocations assigned to a recruiter with requirement and client details."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT
+                ra.id AS allocation_id,
+                ra.requirement_id,
+                ra.created_at AS assigned_date,
+                ra.status,
+                req.title,
+                req.location,
+                req.skills_required,
+                req.experience_required,
+                req.description,
+                req.ctc_range,
+                req.ecto_range,
+                req.status AS requirement_status,
+                req.created_by,
+                client.name AS client_name,
+                assigner.name AS assigned_by
+            FROM requirement_allocations ra
+            JOIN requirements req ON req.id = ra.requirement_id
+            LEFT JOIN clients client ON client.id = req.client_id
+            LEFT JOIN users assigner ON assigner.id = ra.assigned_by
+            WHERE ra.recruiter_id = %s
+            ORDER BY ra.created_at DESC
+        """, (recruiter_id,))
+
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        return jsonify(rows), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/get-requirements", methods=["GET"])
 def get_requirements():
     conn = get_db_connection()
@@ -834,6 +1244,51 @@ def get_requirements():
     conn.close()
 
     return jsonify(data)
+
+
+# -----------------------------
+#  Delete Requirement
+# -----------------------------
+@app.route('/delete-requirement/<req_id>', methods=['DELETE', 'OPTIONS'])
+def delete_requirement(req_id):
+
+    # Handle CORS preflight
+    if request.method == "OPTIONS":
+        return '', 200
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Check if requirement exists
+        cursor.execute("SELECT id FROM requirements WHERE id = %s", (req_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"error": "Requirement not found"}), 404
+
+        # Delete allocations related to this requirement
+        cursor.execute(
+            "DELETE FROM requirement_allocations WHERE requirement_id = %s",
+            (req_id,)
+        )
+
+        # Delete requirement
+        cursor.execute(
+            "DELETE FROM requirements WHERE id = %s",
+            (req_id,)
+        )
+
+        conn.commit()
+
+        return jsonify({"message": "Requirement deleted successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route('/create-client', methods=['POST'])
 def create_client():
@@ -919,16 +1374,33 @@ def update_client(id):
 
 
 # ---------------- DELETE CLIENT ----------------
-@app.route("/delete-client/<int:id>", methods=["DELETE"])
+@app.route('/delete-client/<int:id>', methods=['DELETE'])
 def delete_client(id):
     conn = get_db_connection()
     cursor = conn.cursor()
+
     try:
-        cursor.execute("DELETE FROM clients WHERE id=%s", (id,))
+        # 1️⃣ Check if this client is linked to any requirements
+        cursor.execute("SELECT COUNT(*) FROM requirements WHERE client_id = %s", (id,))
+        req_count = cursor.fetchone()[0]
+
+        if req_count > 0:
+            return jsonify({
+                "message": "Client cannot be deleted because it is used in one or more requirements."
+            }), 400
+
+        # 2️⃣ Safe to delete client
+        cursor.execute("DELETE FROM clients WHERE id = %s", (id,))
         conn.commit()
-        return jsonify({"id": id, "message": "Client deleted successfully"}), 200
+
+        return jsonify({
+            "id": id,
+            "message": "Client deleted successfully!"
+        }), 200
+
     except Error as e:
         return jsonify({"message": str(e)}), 500
+
     finally:
         cursor.close()
         conn.close()
@@ -1011,15 +1483,36 @@ def add_user():
 def update_user(id):
     try:
         data = request.json
-        name = data.get("name")
-        email = data.get("email")
-        phone = data.get("phone")
-        role = data.get("role")
-        status = data.get("status")
         password = data.get("password")  # optional
 
         conn = get_db_connection()
-        cursor = conn.cursor()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT name, email, phone, role, COALESCE(status,'ACTIVE') AS status FROM users WHERE id=%s",
+            (id,)
+        )
+        existing = cursor.fetchone()
+        if not existing:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "User not found"}), 404
+
+        name = data.get("name", existing["name"])
+        email = data.get("email", existing["email"])
+        phone = data.get("phone", existing["phone"])
+        role = data.get("role", existing["role"])
+        status = data.get("status", existing["status"] or "ACTIVE")
+
+        # basic validation
+        if not all([name, email]):
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Name and email are required"}), 400
+
+        update_values = [name, email, phone, role, status, id]
 
         if password:
             password_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -1030,7 +1523,7 @@ def update_user(id):
         else:
             cursor.execute(
                 "UPDATE users SET name=%s, email=%s, phone=%s, role=%s, status=%s WHERE id=%s",
-                (name, email, phone, role, status, id)
+                update_values
             )
 
         conn.commit()
@@ -1069,6 +1562,7 @@ if __name__ == '__main__':
     # Import AI routes after env loading (to avoid circular import issues)
     from controllers.ai_chat_controller import register_ai_routes
     from controllers.ai_jd_controller import jd_bp
+    initialize_database()
     ensure_admin_exists()
     ensure_user_status_defaults()
     # Register AI assistant routes without altering existing endpoints

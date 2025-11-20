@@ -233,6 +233,30 @@ def list_requirements_for_admin() -> List[Dict[str, Any]]:
 	)
 
 
+def list_requirement_allocations() -> List[Dict[str, Any]]:
+
+	return _fetch_all(
+		"""
+		SELECT 
+			ra.id,
+			ra.requirement_id,
+			ra.recruiter_id,
+			ra.assigned_by,
+			ra.status,
+			ra.created_at,
+			req.title AS requirement_title,
+			recruiter.name AS recruiter_name,
+			assigner.name AS assigned_by_name
+		FROM requirement_allocations ra
+		LEFT JOIN requirements req ON req.id = ra.requirement_id
+		LEFT JOIN users recruiter ON recruiter.id = ra.recruiter_id
+		LEFT JOIN users assigner ON assigner.id = ra.assigned_by
+		ORDER BY ra.created_at DESC
+		""",
+		(),
+	)
+
+
 def get_client_by_id_for_user(client_id: str, user: UserDict) -> Optional[Dict[str, Any]]:
 
 	if _is_admin(user):
@@ -304,6 +328,18 @@ def list_users_for_admin() -> List[Dict[str, Any]]:
 		"""
 		SELECT id, name, email, role, phone, status, created_at
 		FROM users
+		ORDER BY created_at DESC
+		""",
+		(),
+	)
+
+
+def list_usersdata() -> List[Dict[str, Any]]:
+
+	return _fetch_all(
+		"""
+		SELECT id, name, email, phone, role, status, created_at
+		FROM usersdata
 		ORDER BY created_at DESC
 		""",
 		(),
@@ -424,5 +460,135 @@ def get_client_for_user(client_id: str, user: UserDict) -> Optional[Dict[str, An
 		return None
 
 	return None
+
+
+# ------------------------------------------------------------------
+# User-centric helpers for AI chat / dashboards
+# ------------------------------------------------------------------
+
+def get_user_profile_summary(user_id: int) -> Optional[Dict[str, Any]]:
+
+	return _fetch_one(
+		"""
+		SELECT
+			u.id,
+			u.name,
+			u.email,
+			COALESCE(u.phone, ud.phone) AS phone,
+			u.role,
+			COALESCE(u.status, ud.status, 'ACTIVE') AS status,
+			u.created_at
+		FROM users u
+		LEFT JOIN usersdata ud ON ud.email = u.email
+		WHERE u.id = %s
+		""",
+		(user_id,),
+	)
+
+
+def list_assignments_for_user(user_id: int) -> List[Dict[str, Any]]:
+
+	return _fetch_all(
+		"""
+		SELECT
+			ra.id AS allocation_id,
+			ra.requirement_id,
+			ra.status AS allocation_status,
+			ra.created_at AS assigned_date,
+			req.title,
+			req.description,
+			req.location,
+			req.skills_required,
+			req.experience_required,
+			req.status AS requirement_status,
+			client.name AS client_name,
+			assigner.name AS assigned_by
+		FROM requirement_allocations ra
+		JOIN requirements req ON req.id = ra.requirement_id
+		LEFT JOIN clients client ON client.id = req.client_id
+		LEFT JOIN users assigner ON assigner.id = ra.assigned_by
+		WHERE ra.recruiter_id = %s
+		ORDER BY ra.created_at DESC
+		""",
+		(user_id,),
+	)
+
+
+def list_candidates_created_by_user(user_id: int) -> List[Dict[str, Any]]:
+
+	return _fetch_all(
+		"""
+		SELECT
+			id,
+			name,
+			email,
+			phone,
+			skills,
+			education,
+			experience,
+			resume_filename,
+			created_at
+		FROM candidates
+		WHERE created_by = %s
+		ORDER BY created_at DESC
+		""",
+		(user_id,),
+	)
+
+
+def get_org_stats_snapshot() -> Dict[str, int]:
+
+	stats = {
+		"total_requirements": 0,
+		"open_requirements": 0,
+		"total_candidates": 0,
+		"total_users": 0,
+		"total_clients": 0,
+	}
+
+	conn = get_db_connection()
+	if not conn:
+		return stats
+	cursor = conn.cursor(dictionary=True)
+	try:
+		cursor.execute("SELECT COUNT(*) AS total_requirements FROM requirements")
+		stats["total_requirements"] = cursor.fetchone().get("total_requirements", 0)
+
+		cursor.execute("SELECT COUNT(*) AS open_requirements FROM requirements WHERE status = 'OPEN'")
+		stats["open_requirements"] = cursor.fetchone().get("open_requirements", 0)
+
+		cursor.execute("SELECT COUNT(*) AS total_candidates FROM candidates")
+		stats["total_candidates"] = cursor.fetchone().get("total_candidates", 0)
+
+		cursor.execute("SELECT COUNT(*) AS total_users FROM users")
+		stats["total_users"] = cursor.fetchone().get("total_users", 0)
+
+		cursor.execute("SELECT COUNT(*) AS total_clients FROM clients")
+		stats["total_clients"] = cursor.fetchone().get("total_clients", 0)
+
+		return stats
+	finally:
+		cursor.close()
+		conn.close()
+
+
+def build_user_self_context(user: UserDict) -> Dict[str, Any]:
+
+	if not user or not user.get("id"):
+		return {}
+
+	user_id = user.get("id")
+	role = (user.get("role") or "").upper()
+
+	context = {
+		"self_profile": get_user_profile_summary(user_id),
+		"self_assignments": list_assignments_for_user(user_id),
+		"self_candidates": list_candidates_created_by_user(user_id),
+	}
+
+	if role in ("ADMIN", "DELIVERY_MANAGER"):
+		context["self_org_stats"] = get_org_stats_snapshot()
+
+	return context
 
 

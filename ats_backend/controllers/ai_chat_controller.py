@@ -17,6 +17,9 @@ from services.ai_data_service import (
     list_clients_for_user,
     list_requirements_for_admin,
     list_candidates_for_user,
+    list_requirement_allocations,
+    list_usersdata,
+    build_user_self_context,
 )
 
 
@@ -24,12 +27,19 @@ ai_bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
 
 SYSTEM_PROMPT = (
-	"You are an ATS assistant. Answer ONLY from the CONTEXT. The current database "
-	"contains: requirements, requirement_allocations, clients, users, and candidates. "
-	"Obey role rules: admin and delivery manager can access everything including candidates; "
-	"recruiter may access requirements allocated to them; client may only access requirements where client_id matches their id. "
-	"Never invent data. If a record or access is missing, say so directly and propose related information available "
-	"(e.g., requirement details, client data, allocations, candidates)."
+	"You are an ATS assistant. Answer ONLY from the CONTEXT provided. "
+	"The ATS database includes these tables and columns:\n"
+	"- candidates: id, name, email, phone, skills, education, experience, resume_filename, created_at\n"
+	"- requirements: id, client_id, title, description, location, skills_required, experience_required, ctc_range, ecto_range, status, created_at\n"
+	"- requirement_allocations: id, requirement_id, recruiter_id, assigned_by, status, created_at\n"
+	"- clients: id, name, contact_person, email, phone, address, status, created_at\n"
+	"- users: id, name, email, phone, role, status, created_at\n"
+	"- usersdata: id, name, email, phone, role, status, created_at\n"
+	"If the context contains self_profile, self_assignments, self_candidates, or self_org_stats, use them to answer "
+	"questions about the logged-in user directly (e.g., “what are my assignments?”, “what’s my phone number?”). "
+	"Role rules: admin and delivery manager can access everything including candidates and allocations; "
+	"recruiters only see requirements allocated to them; clients only see requirements where client_id matches their id. "
+	"Never invent data. If a record or access is missing, say so directly and offer available related information."
 )
 
 
@@ -67,6 +77,9 @@ def chat() -> Any:
 	intent = _detect_intent(message)
 
 	context: Dict[str, Any] = {"user": {"id": user.get("id"), "role": user.get("role"), "client_id": user.get("client_id")}, "query": message}
+	self_context = build_user_self_context(user)
+	if self_context:
+		context.update(self_context)
 
 	try:
 		# 3) Fetch ATS data with role-based filtering
@@ -126,6 +139,7 @@ def chat() -> Any:
 			role = (user.get("role") or "").upper()
 			if role == "ADMIN":
 				context["users"] = list_users_for_admin()
+				context["usersdata"] = list_usersdata()
 			else:
 				context["recruiters"] = list_recruiters_for_user(user)
 
@@ -134,8 +148,10 @@ def chat() -> Any:
 			# Load key datasets so LLM can answer "anything" within ATS
 			context["clients"] = context.get("clients") or list_clients_for_user(user)
 			context["users"] = context.get("users") or list_users_for_admin()
+			context["usersdata"] = context.get("usersdata") or list_usersdata()
 			context["requirements"] = context.get("requirements") or list_requirements_for_admin()
 			context["candidates"] = context.get("candidates") or list_candidates_for_user(user)
+			context["allocations"] = context.get("allocations") or list_requirement_allocations()
 
 		# 4) Call LLM with system prompt, original question, and structured context
 		answer = call_llm(SYSTEM_PROMPT, context, message)
