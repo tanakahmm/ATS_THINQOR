@@ -41,8 +41,8 @@ else:
 db_config = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'ats')
+    'password': os.getenv('DB_PASSWORD', 'pujitha'),
+    'database': os.getenv('DB_NAME', 'ats_system')
 }
 
 def initialize_database():
@@ -145,23 +145,24 @@ def initialize_database():
         # CANDIDATES TABLE
         # ---------------------------
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS candidates (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255),
-                email VARCHAR(255),
-                phone VARCHAR(20),
-                skills TEXT,
-                education TEXT,
-                experience TEXT,
-                resume_filename VARCHAR(255),
-                created_by INT,
-                source VARCHAR(50),
-                ctc INT,
-                ectc INT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (created_by) REFERENCES users(id)
-            );
-        """)
+    CREATE TABLE IF NOT EXISTS candidates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255),
+        email VARCHAR(255),
+        phone VARCHAR(20),
+        skills TEXT,
+        education TEXT,
+        experience TEXT,
+        ctc VARCHAR(50),          
+        ectc VARCHAR(50),         
+        resume_filename VARCHAR(255),
+        created_by INT,
+        source VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+""")
+
 
         # ---------------------------
         # REQUIREMENT STAGES (NEW)
@@ -268,8 +269,6 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-
-# --- ADD: Extract role ENUM values ---
 def get_allowed_roles():
     import re
     conn = get_db_connection()
@@ -461,6 +460,19 @@ def submit_candidate():
         print("❌ Error:", e)
         return jsonify({"message": "❌ Error submitting candidate", "error": str(e)}), 500
 
+@app.route("/roles", methods=["GET"])
+def roles_endpoint():
+    """
+    Returns JSON: { "roles": ["ADMIN","RECRUITER", ...] }
+    Frontend should call this to populate role dropdowns dynamically.
+    """
+    try:
+        roles = get_allowed_roles()
+        return jsonify({"roles": roles}), 200
+    except Exception as e:
+        return jsonify({"roles": [], "error": str(e)}), 500
+    
+
 @app.route("/get-candidates", methods=["GET"])
 def get_candidates():
     try:
@@ -507,7 +519,7 @@ def get_candidates():
         cursor.execute("""
             SELECT COLUMN_NAME 
             FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA='ats'
+            WHERE TABLE_SCHEMA='ats_system'
             AND TABLE_NAME='candidates'
         """)
         cols = [row["COLUMN_NAME"] for row in cursor.fetchall()]
@@ -1124,7 +1136,7 @@ def create_requirement():
         if missing:
             return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
 
-        # Normalize client_id (ensure int for DB schema)
+        # Normalize client_id
         client_id_value = data.get("client_id")
         try:
             client_id_value = int(client_id_value)
@@ -1137,25 +1149,14 @@ def create_requirement():
                 text = str(value or "").strip()
             except Exception:
                 text = ""
-            if length:
-                return text[:length]
-            return text
-
-        # Normalize and sanitize CTC fields (DB columns may be numeric or varchar; coerce to clean text)
-        def _sanitize_ctc(value):
-            try:
-                text = str(value or "").strip()
-            except Exception:
-                text = ""
-            # Keep only a reasonable length to fit column widths (e.g., 100)
-            return text[:100]
+            return text[:length] if length else text
 
         title_value = _sanitize_text(data.get("title"), 255)
         description_value = _sanitize_text(data.get("description"))
         location_value = _sanitize_text(data.get("location"), 100)
         skills_value = _sanitize_text(data.get("skills_required"), 255)
 
-        # Experience required (float column) - extract first numeric value, default 0.0
+        # Experience required
         experience_raw = data.get("experience_required")
         try:
             if isinstance(experience_raw, (int, float)):
@@ -1163,12 +1164,12 @@ def create_requirement():
             else:
                 matches = re.findall(r"[\d\.]+", str(experience_raw or ""))
                 experience_value = float(matches[0]) if matches else 0.0
-        except (ValueError, TypeError):
+        except:
             experience_value = 0.0
 
-        ctc_range_value = _sanitize_ctc(data.get("ctc_range"))
-        # Frontend may send 'ectc_range' (expected CTC); DB column is 'ecto_range'
-        
+        # Only CTC exists in table now
+        ctc_range_value = _sanitize_text(data.get("ctc_range"), 100)
+
         created_by_value = _sanitize_text(data.get("created_by"), 50).upper()
 
         conn = get_db_connection()
@@ -1176,7 +1177,8 @@ def create_requirement():
 
         cursor.execute("""
             INSERT INTO requirements
-            (id, client_id, title, description, location, skills_required, experience_required, ctc_range, status, created_by)
+            (id, client_id, title, description, location, skills_required, 
+             experience_required, ctc_range, status, created_by)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'OPEN',%s)
         """, (
             req_id,
@@ -1190,35 +1192,31 @@ def create_requirement():
             created_by_value
         ))
 
-        
-
-
         conn.commit()
         cursor.close()
         conn.close()
 
-        # Get current user for notification
-        user = get_current_user()
-        # Get client name for better email context
+        # Fetch client name (optional)
         client_name = "Unknown Client"
-        if client_id_value:
-            try:
-                conn2 = get_db_connection()
-                if conn2:
-                    cursor2 = conn2.cursor(dictionary=True)
-                    cursor2.execute("SELECT name FROM clients WHERE id = %s", (client_id_value,))
-                    client_row = cursor2.fetchone()
-                    if client_row:
-                        client_name = client_row.get("name", "Unknown Client")
-                    cursor2.close()
-                    conn2.close()
-            except Exception:
-                pass
-        
+        try:
+            conn2 = get_db_connection()
+            cursor2 = conn2.cursor(dictionary=True)
+            cursor2.execute("SELECT name FROM clients WHERE id = %s", (client_id_value,))
+            row = cursor2.fetchone()
+            if row:
+                client_name = row["name"]
+            cursor2.close()
+            conn2.close()
+        except:
+            pass
+
+        user = get_current_user()
+
+        # Notify event
         notify_event("new_requirement_created", {
             "id": req_id,
             "title": title_value,
-            "description": description_value[:100] + "..." if len(description_value) > 100 else description_value,  # First 100 chars
+            "description": description_value[:100] + "..." if len(description_value) > 100 else description_value,
             "location": location_value,
             "client_id": client_id_value,
             "client_name": client_name,
@@ -1230,11 +1228,13 @@ def create_requirement():
             "created_by_role": user.get("role", "UNKNOWN"),
             "created_at": str(datetime.now())
         })
+
         return jsonify({"message": "Requirement created", "id": req_id}), 201
 
     except Exception as e:
         print("❌ Error creating requirement:", e)
         return jsonify({"error": str(e)}), 500
+
     
 @app.route("/assign-requirement", methods=["POST"])
 def assign_requirement():

@@ -30,9 +30,6 @@ export default function CandidateApplicationUI() {
     ? parseInt(recruiterIdFromQuery)
     : user?.id || null;
 
-  // ----------------------------------------------------
-  // LOAD CANDIDATES
-  // ----------------------------------------------------
   const fetchCandidates = async () => {
     try {
       const params = new URLSearchParams();
@@ -53,36 +50,14 @@ export default function CandidateApplicationUI() {
     fetchCandidates();
   }, [user]);
 
-  useEffect(() => {
-    const fetchRequirements = async () => {
-      try {
-        setRequirementsLoading(true);
-        const res = await fetch("http://localhost:5000/get-requirements");
-        const data = await res.json();
-        setRequirementsOptions(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error("Fetch requirements error:", error);
-        setRequirementsOptions([]);
-      } finally {
-        setRequirementsLoading(false);
-      }
-    };
-
-    fetchRequirements();
-  }, []);
-
-  // ----------------------------------------------------
-  // FORM CHANGE HANDLERS
-  // ----------------------------------------------------
   const handleChange = (e) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleFileChange = (e) => setResume(e.target.files[0] || null);
+  const handleFileChange = (e) => {
+    setResume(e.target.files[0]);
+  };
 
-  // ----------------------------------------------------
-  // CREATE / UPDATE CANDIDATE
-  // ----------------------------------------------------
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -90,14 +65,9 @@ export default function CandidateApplicationUI() {
     Object.entries(formData).forEach(([k, v]) => data.append(k, v));
 
     if (resume) data.append("resume", resume);
-    if (!editId && createdByUserId) data.append("created_by", createdByUserId);
 
-    let url = "http://localhost:5000/submit-candidate";
-    let method = "POST";
-
-    if (editId) {
-      url = `http://localhost:5000/update-candidate/${editId}`;
-      method = "PUT";
+    if (!editCandidateId && createdByUserId) {
+      data.append("created_by", createdByUserId);
     }
 
     try {
@@ -109,7 +79,25 @@ export default function CandidateApplicationUI() {
         resetForm();
         fetchCandidates();
 
-        // return recruiter dashboard
+      const response = await fetch(url, { method, body: data });
+      const result = await response.json();
+
+      if (response.ok) {
+        setMessage(`✅ ${result.message}`);
+        fetchCandidates();
+        setFormData({
+          name: "",
+          email: "",
+          phone: "",
+          skills: "",
+          education: "",
+          experience: "",
+          ctc: "",
+          ectc: "",
+        });
+        setResume(null);
+        setEditCandidateId(null);
+
         const fromState = window.history.state?.usr?.from;
         if (fromState === "/recruiter-dashboard") {
           setTimeout(() => navigate("/recruiter-dashboard"), 1200);
@@ -123,27 +111,21 @@ export default function CandidateApplicationUI() {
     }
   };
 
-  // ----------------------------------------------------
-  // EDIT CANDIDATE
-  // ----------------------------------------------------
-  const handleEdit = (item) => {
-    setEditId(item.id);
+  const handleEdit = (candidate) => {
+    setEditCandidateId(candidate.id);
     setFormData({
-      name: item.name,
-      email: item.email,
-      phone: item.phone,
-      skills: item.skills,
-      education: item.education,
-      experience: item.experience,
-      ctc: item.ctc || "",
-      ectc: item.ectc || "",
+      name: candidate.name,
+      email: candidate.email,
+      phone: candidate.phone,
+      skills: candidate.skills,
+      education: candidate.education,
+      experience: candidate.experience,
+      ctc: candidate.ctc || "",
+      ectc: candidate.ectc || "",
     });
     setMessage("Editing candidate...");
   };
 
-  // ----------------------------------------------------
-  // DELETE CANDIDATE
-  // ----------------------------------------------------
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this candidate?")) return;
 
@@ -245,149 +227,204 @@ export default function CandidateApplicationUI() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-8 bg-white rounded-xl shadow-md space-y-10">
-      <h2 className="text-2xl font-bold mb-2 text-gray-700 text-center">
-        {editId ? "Edit Candidate" : "Candidate Application"}
-      </h2>
+    <div className="max-w-5xl mx-auto p-8 bg-white shadow-lg rounded-2xl space-y-10">
+      
+      <div>
+        <h2 className="text-2xl font-semibold mb-6 text-gray-800 text-center">
+          {editCandidateId ? "✏ Edit Candidate" : "🧾 Candidate Application"}
+        </h2>
 
       {message && (
         <p className="text-center text-green-600 font-medium">{message}</p>
       )}
 
-      {/* FORM */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <div>
+              <label className="block text-sm font-medium mb-1">Full Name</label>
+              <input
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                type="text"
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
+                required
+              />
+            </div>
 
-          <input
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            placeholder="Full Name"
-            className="border p-3 rounded"
-            required
-          />
+            <div>
+              <label className="block text-sm font-medium mb-1">Email</label>
+              <input
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                type="email"
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
+                required
+              />
+            </div>
 
-          <input
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="Email"
-            className="border p-3 rounded"
-            required
-          />
+            <div>
+              <label className="block text-sm font-medium mb-1">Phone</label>
+              <input
+                name="phone"
+                value={formData.phone}
+                onChange={handleChange}
+                type="tel"
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
+              />
+            </div>
 
-          <input
-            name="phone"
-            value={formData.phone}
-            onChange={handleChange}
-            placeholder="Phone"
-            className="border p-3 rounded"
-          />
+            <div>
+              <label className="block text-sm font-medium mb-1">Skills</label>
+              <input
+                name="skills"
+                value={formData.skills}
+                onChange={handleChange}
+                type="text"
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
+              />
+            </div>
 
-          <input
-            name="skills"
-            value={formData.skills}
-            onChange={handleChange}
-            placeholder="Skills (comma separated)"
-            className="border p-3 rounded"
-          />
+            {/* NEW: CTC */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Current CTC (LPA)</label>
+              <input
+                name="ctc"
+                value={formData.ctc}
+                onChange={handleChange}
+                type="number"
+                placeholder="Eg: 6"
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
+              />
+            </div>
 
-          <input
-            name="ctc"
-            value={formData.ctc}
-            onChange={handleChange}
-            placeholder="Current CTC (LPA)"
-            className="border p-3 rounded"
-          />
+            {/* NEW: ECTC */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Expected CTC (LPA)</label>
+              <input
+                name="ectc"
+                value={formData.ectc}
+                onChange={handleChange}
+                type="number"
+                placeholder="Eg: 8"
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
+              />
+            </div>
 
-          <input
-            name="ectc"
-            value={formData.ectc}
-            onChange={handleChange}
-            placeholder="Expected CTC (LPA)"
-            className="border p-3 rounded"
-          />
-        </div>
+          </div>
 
-        <textarea
-          name="education"
-          value={formData.education}
-          onChange={handleChange}
-          placeholder="Education Summary"
-          className="border w-full p-3 rounded"
-          rows={3}
-        />
+          <div>
+            <label className="block text-sm font-medium mb-1">Education Summary</label>
+            <textarea
+              name="education"
+              value={formData.education}
+              onChange={handleChange}
+              rows="3"
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-400"
+            />
+          </div>
 
-        <textarea
-          name="experience"
-          value={formData.experience}
-          onChange={handleChange}
-          placeholder="Experience Summary"
-          className="border w-full p-3 rounded"
-          rows={4}
-        />
+          <div>
+            <label className="block text-sm font-medium mb-1">Experience Summary</label>
+            <textarea
+              name="experience"
+              value={formData.experience}
+              onChange={handleChange}
+              rows="4"
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-400"
+            />
+          </div>
 
-        {/* RESUME UPLOAD */}
-        <div>
-          <label className="block mb-1 font-medium">Upload Resume</label>
-          <input type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} />
-        </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Upload Resume</label>
+            <div className="border-dashed border-2 border-gray-300 rounded-lg p-6 text-center">
+              <input
+                type="file"
+                id="resume"
+                className="hidden"
+                accept=".pdf,.doc,.docx"
+                onChange={handleFileChange}
+              />
+              <label htmlFor="resume" className="cursor-pointer text-green-600 hover:underline">
+                {editCandidateId ? "Upload new resume (optional)" : "Click to upload resume"}
+              </label>
+              {resume && <p className="text-sm text-gray-700 mt-2">{resume.name}</p>}
+            </div>
+          </div>
 
-        <div className="flex justify-between">
-          <button className="bg-green-600 text-white px-6 py-2 rounded">
-            {editId ? "Update" : "Submit"}
-          </button>
+          <div className="flex justify-between mt-6">
+            <button
+              type="submit"
+              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
+            >
+              {editCandidateId ? "Update Candidate" : "Submit Application"}
+            </button>
 
-          <button
-            type="button"
-            onClick={resetForm}
-            className="border px-6 py-2 rounded"
-          >
-            Clear
-          </button>
-        </div>
-      </form>
+            <button
+              type="reset"
+              className="border border-gray-300 px-6 py-2 rounded-lg"
+              onClick={() => {
+                setFormData({
+                  name: "",
+                  email: "",
+                  phone: "",
+                  skills: "",
+                  education: "",
+                  experience: "",
+                  ctc: "",
+                  ectc: "",
+                });
+                setResume(null);
+                setEditCandidateId(null);
+                setMessage("");
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        </form>
+      </div>
 
-      {/* CANDIDATE LIST */}
       <div>
         <h3 className="text-xl font-semibold mb-4">Candidate List</h3>
 
         {candidates.length === 0 ? (
           <p className="text-gray-500">No candidates found.</p>
         ) : (
-          <table className="w-full border">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 border">Name</th>
-                <th className="p-2 border">Email</th>
-                <th className="p-2 border">Phone</th>
-                <th className="p-2 border">Skills</th>
-                <th className="p-2 border">CTC</th>
-                <th className="p-2 border">ECTC</th>
-                <th className="p-2 border text-center">Actions</th>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-green-100 text-left">
+                <th className="p-3 border">Name</th>
+                <th className="p-3 border">Email</th>
+                <th className="p-3 border">Phone</th>
+                <th className="p-3 border">Skills</th>
+                <th className="p-3 border">CTC</th>
+                <th className="p-3 border">ECTC</th>
+                <th className="p-3 border">Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {candidates.map((c) => (
-                <tr key={c.id} className="border">
-                  <td className="p-2 border">{c.name}</td>
-                  <td className="p-2 border">{c.email}</td>
-                  <td className="p-2 border">{c.phone}</td>
-                  <td className="p-2 border">{c.skills}</td>
-                  <td className="p-2 border">{c.ctc || "-"}</td>
-                  <td className="p-2 border">{c.ectc || "-"}</td>
-                  <td className="p-2 border text-center flex gap-2 justify-center flex-wrap">
+              {candidates.map((candidate) => (
+                <tr key={candidate.id} className="hover:bg-gray-50">
+                  <td className="p-3 border">{candidate.name}</td>
+                  <td className="p-3 border">{candidate.email}</td>
+                  <td className="p-3 border">{candidate.phone}</td>
+                  <td className="p-3 border">{candidate.skills}</td>
+                  <td className="p-3 border">{candidate.ctc}</td>
+                  <td className="p-3 border">{candidate.ectc}</td>
+                  <td className="p-3 border flex gap-2">
                     <button
-                      onClick={() => handleEdit(c)}
+                      onClick={() => handleEdit(candidate)}
                       className="bg-blue-500 text-white px-3 py-1 rounded"
                     >
                       Edit
                     </button>
 
                     <button
-                      onClick={() => handleDelete(c.id)}
+                      onClick={() => handleDelete(candidate.id)}
                       className="bg-red-500 text-white px-3 py-1 rounded"
                     >
                       Delete

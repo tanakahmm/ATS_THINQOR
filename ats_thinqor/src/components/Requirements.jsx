@@ -256,7 +256,7 @@ export default function Requirements() {
                   <td className="p-2">{req.location}</td>
                   <td className="p-2">{req.experience_required} yrs</td>
                   <td className="p-2">{req.skills_required}</td>
-                  <td className="p-2">{req.ctc_range}</td>
+                  <td className="p-2">{req.ctc_range || "--"}</td>
                   <td className="p-2">
                     {clients.find((c) => c.id === req.client_id)?.name || "--"}
                   </td>
