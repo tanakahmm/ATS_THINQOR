@@ -1,10 +1,10 @@
-// src/components/DmDashboard.jsx
+// src/components/TLDashboard.jsx
 
 import React, { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
-export default function DmDashboard() {
+export default function TLDashboard() {
   const { user } = useSelector((state) => state.auth || {});
   const navigate = useNavigate();
 
@@ -14,7 +14,8 @@ export default function DmDashboard() {
 
   // Redirect if unauthorized
   useEffect(() => {
-    if (!user || user?.role !== "DELIVERY_MANAGER") navigate("/");
+    if (loading) return; 
+    if (!user || user?.role !== "TL") navigate("/"); // Only allow TL
   }, [user, navigate]);
 
   // Load data
@@ -69,7 +70,7 @@ export default function DmDashboard() {
       label: "Search Candidates",
       desc: "Find matching profiles",
       icon: "search",
-      onClick: () => navigate("/candidates"), // ensure this route exists
+      onClick: () => navigate("/candidates"),
     },
     {
       label: "Allocate Requirement",
@@ -105,20 +106,21 @@ export default function DmDashboard() {
       value: stats?.open ?? "-",
       color: "#eaffef",
       accent: "green",
-  
+      subtitle: `${stats?.urgent ?? 0} urgent`,
     },
     {
       title: "Closed Requirements",
       value: stats?.closed ?? "-",
       color: "#fff3f8",
       accent: "pink",
-  
+      subtitle: `${stats?.closedGrowthPercent ?? 0}% ↑`,
     },
     {
       title: "Assigned to Recruiters",
       value: stats?.assigned ?? "-",
       color: "#fff6e8",
       accent: "yellow",
+      subtitle: `${stats?.pendingReview ?? 0} pending review`,
     },
   ];
 
@@ -129,7 +131,7 @@ export default function DmDashboard() {
         <div>
           <p className="text-indigo-500 text-sm">Good Afternoon</p>
           <h1 className="text-4xl font-extrabold text-indigo-700 mt-1">
-            Hiring Manager Dashboard
+            Team Lead Dashboard
           </h1>
           <p className="text-gray-500 mt-2">
             Track requirements and manage operations efficiently.

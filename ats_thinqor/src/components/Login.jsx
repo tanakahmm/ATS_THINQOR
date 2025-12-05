@@ -19,6 +19,7 @@ export default function Login() {
       // Navigate based on role (optional)
       if (user.role === "ADMIN") navigate("/admin-dashboard");
       else if (user.role === "DELIVERY_MANAGER") navigate("/dm-dashboard");
+      else if (user.role === "TEAM_LEAD") navigate("/tl-dashboard");
       else navigate("/recruiter-dashboard");
     }
   }, [user, navigate]);

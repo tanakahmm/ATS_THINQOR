@@ -18,7 +18,7 @@ import CandidateList from "./components/CandidateList";
 import CandidateTracking from "./components/CandidateTracking";
 import Reports from "./components/Reports";
 import Settings from "./components/Settings";
-
+import TlDashboard from "./components/TLDashboard";
 export default function App() {
   return (
     <>
@@ -44,7 +44,7 @@ export default function App() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/offers" element={<div className="p-10 text-center text-gray-500">Offers Page Coming Soon</div>} />
-
+        <Route path="/tl-dashboard" element={<TlDashboard />} />
         {/* Add other routes as needed */}
         {/* Example future routes:
         <Route path="/dashboard" element={<UserDashboard />} />

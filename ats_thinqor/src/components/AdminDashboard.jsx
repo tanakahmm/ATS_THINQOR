@@ -303,7 +303,7 @@ export default function AdminDashboard() {
                       </td>
                       <td className="p-3">
                         <span className="px-3 py-1 text-xs rounded-full font-semibold">
-                          {u.created_at.split("T")[0]}
+                          {u.created_at}
                         </span>
                       </td>
                     </tr>

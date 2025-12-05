@@ -1742,6 +1742,153 @@ def delete_requirement(req_id):
         cursor.close()
         conn.close()
 
+@app.route("/recent-requirements", methods=["GET"])
+def recent_requirements():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Ensure correct DB
+        cursor.execute("USE ats_system")
+
+        # Ensure table exists
+        cursor.execute("SHOW TABLES LIKE 'requirements'")
+        if not cursor.fetchone():
+            return jsonify([]), 200
+
+        # Fetch latest 5 requirements
+        cursor.execute("""
+            SELECT 
+                id,
+                title,
+                status,
+                DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS date
+            FROM requirements
+            ORDER BY created_at DESC
+            LIMIT 5
+        """)
+
+        rows = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify(rows), 200
+
+    except Exception as e:
+        print("❌ Error fetching recent requirements:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/dashboard-stats', methods=['GET'])
+def dashboard_stats():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Use your database
+        cursor.execute("USE ats_system")
+
+        # Total requirements
+        cursor.execute("SELECT COUNT(*) AS total FROM requirements")
+        total = cursor.fetchone()['total'] or 0
+
+        # Open requirements
+        cursor.execute("SELECT COUNT(*) AS open_count FROM requirements WHERE status = 'Open'")
+        open_req = cursor.fetchone()['open_count'] or 0
+
+        # Closed requirements
+        cursor.execute("SELECT COUNT(*) AS closed_count FROM requirements WHERE status = 'Closed'")
+        closed_req = cursor.fetchone()['closed_count'] or 0
+
+        # Assigned requirements
+        cursor.execute("SELECT COUNT(*) AS assigned_count FROM requirement_allocations")
+        assigned_req = cursor.fetchone()['assigned_count'] or 0
+
+        # Urgent requirements (example: open and no_of_rounds > 5)
+        cursor.execute("SELECT COUNT(*) AS urgent_count FROM requirements WHERE status = 'Open' AND no_of_rounds > 5")
+        urgent_req = cursor.fetchone()['urgent_count'] or 0
+
+        # Pending review
+        cursor.execute("SELECT COUNT(*) AS pending_review FROM requirement_allocations WHERE status = 'Pending'")
+        pending_review = cursor.fetchone()['pending_review'] or 0
+
+        # Closed growth percent (closed this month / total)
+        start_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        cursor.execute(
+            "SELECT COUNT(*) AS closed_this_month FROM requirements "
+            "WHERE status = 'Closed' AND created_at >= %s",
+            (start_of_month,)
+        )
+        closed_this_month = cursor.fetchone()['closed_this_month'] or 0
+        closed_growth_percent = round((closed_this_month / total) * 100, 2) if total else 0
+
+        cursor.close()
+        conn.close()
+
+        stats = {
+            "totalRequirements": total,
+            "openRequirements": open_req,
+            "closedRequirements": closed_req,
+            "assignedRequirements": assigned_req,
+            "urgent": urgent_req,
+            "pendingReview": pending_review,
+            "closedGrowthPercent": closed_growth_percent
+        }
+
+        return jsonify({"stats": stats})
+
+    except Exception as e:
+        print("❌ Error fetching dashboard stats:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/update-requirement/<req_id>", methods=["PUT"])
+def update_requirement(req_id):
+    data = request.json
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("SELECT * FROM requirements WHERE id = %s", (req_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        return jsonify({"error": "Requirement not found"}), 404
+
+    cursor = conn.cursor()  # non-dict cursor for update
+
+    cursor.execute("""
+        UPDATE requirements
+        SET title=%s, location=%s, experience_required=%s,
+            skills_required=%s, ctc_range=%s, client_id=%s, status=%s
+        WHERE id=%s
+    """, (
+        data["title"],
+        data["location"],
+        data["experience_required"],
+        data["skills_required"],
+        data["ctc_range"],
+        data["client_id"],
+        data["status"],
+        req_id
+    ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({"message": "Requirement updated"})
+
+
+
+
+
+
+
+
+
+
+
 
 @app.route('/create-client', methods=['POST'])
 def create_client():
