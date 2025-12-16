@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
 const API_BASE = "http://localhost:5001";
@@ -10,15 +11,28 @@ export default function CandidateList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const user = useSelector((state) => state.auth.user);
 
   useEffect(() => {
     loadCandidates();
     loadRequirements();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadCandidates = async () => {
     try {
-      const res = await fetch(`${API_BASE}/get-candidates?user_role=ADMIN`);
+      let url = `${API_BASE}/get-candidates`;
+
+      if (user && user.role) {
+        const params = new URLSearchParams();
+        params.set("user_role", user.role);
+        if (user.id) {
+          params.set("user_id", user.id);
+        }
+        url = `${url}?${params.toString()}`;
+      }
+
+      const res = await fetch(url);
       const data = await res.json();
       setCandidates(Array.isArray(data) ? data : []);
     } catch (err) {
