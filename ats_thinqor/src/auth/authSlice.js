@@ -249,9 +249,22 @@ export const fetchRecruiters = createAsyncThunk(
 // ------------------------------------------------------------------
 export const fetchCandidates = createAsyncThunk(
   "candidates/fetchCandidates",
-  async (_, { rejectWithValue }) => {
+  async (_, { getState, rejectWithValue }) => {
     try {
-      const response = await axios.get(`${API_URL}/get-candidates`);
+      const state = getState();
+      const user = state.auth?.user;
+
+      let url = `${API_URL}/get-candidates`;
+      if (user && user.role) {
+        const params = new URLSearchParams();
+        params.set("user_role", user.role);
+        if (user.id) {
+          params.set("user_id", user.id);
+        }
+        url = `${API_URL}/get-candidates?${params.toString()}`;
+      }
+
+      const response = await axios.get(url);
       return response.data;
     } catch (error) {
       return rejectWithValue(
@@ -266,14 +279,22 @@ export const fetchCandidates = createAsyncThunk(
 // ------------------------------------------------------------------
 export const submitCandidate = createAsyncThunk(
   "candidates/submitCandidate",
-  async (candidateData, { rejectWithValue }) => {
+  async (candidateData, { getState, rejectWithValue }) => {
     try {
+      const state = getState();
+      const user = state.auth?.user;
+
       const formData = new FormData();
       Object.entries(candidateData).forEach(([key, value]) => {
         if (value !== null && value !== undefined) {
           formData.append(key, value);
         }
       });
+
+      // Ensure created_by is set to the logged-in user's id
+      if (user && user.id) {
+        formData.append("created_by", user.id);
+      }
 
       const response = await axios.post(`${API_URL}/submit-candidate`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
