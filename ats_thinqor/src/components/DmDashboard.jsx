@@ -1,15 +1,15 @@
 // src/components/DmDashboard.jsx
 
 import React, { useEffect, useState } from "react";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import { fetchDashboardStats, fetchRecentRequirements } from "../auth/authSlice";
 
 export default function DmDashboard() {
-  const { user } = useSelector((state) => state.auth || {});
+  const dispatch = useDispatch();
+  const { user, dashboardStats, recentRequirements } = useSelector((state) => state.auth || {});
   const navigate = useNavigate();
 
-  const [stats, setStats] = useState({});
-  const [recentRequirements, setRecentRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Redirect if unauthorized
@@ -20,43 +20,19 @@ export default function DmDashboard() {
   // Load data
   useEffect(() => {
     const load = async () => {
-      try {
-        setLoading(true);
-
-        /* ------------------ FIXED STATS FETCH ------------------ */
-        const statsRes = await fetch("http://localhost:5001/dashboard-stats");
-        const rawStats = statsRes.ok ? await statsRes.json() : null;
-
-        const s = rawStats?.stats || rawStats?.data || {};
-
-        const normalizedStats = {
-          total: s.totalRequirements ?? 0,
-          open: s.openRequirements ?? 0,
-          closed: s.closedRequirements ?? 0,
-          assigned: s.assignedRequirements ?? 0,
-          urgent: s.urgent ?? 0,
-          closedGrowthPercent: s.closedGrowthPercent ?? 0,
-          pendingReview: s.pendingReview ?? 0,
-        };
-
-        setStats(normalizedStats);
-
-        /* ------------------ Recent Requirements ------------------ */
-        const reqRes = await fetch("http://localhost:5001/recent-requirements");
-        const rawReq = reqRes.ok ? await reqRes.json() : [];
-
-        setRecentRequirements(rawReq);
-      } catch (err) {
-        console.error("❗ Dashboard load error:", err);
-        setStats({});
-        setRecentRequirements([]);
-      } finally {
-        setLoading(false);
-      }
+      setLoading(true);
+      await Promise.all([
+        dispatch(fetchDashboardStats()),
+        dispatch(fetchRecentRequirements())
+      ]);
+      setLoading(false);
     };
 
     load();
-  }, []);
+  }, [dispatch]);
+
+  const stats = dashboardStats || {};
+  const recentReqs = recentRequirements || [];
 
   const actions = [
     {
@@ -105,14 +81,14 @@ export default function DmDashboard() {
       value: stats?.open ?? "-",
       color: "#eaffef",
       accent: "green",
-  
+
     },
     {
       title: "Closed Requirements",
       value: stats?.closed ?? "-",
       color: "#fff3f8",
       accent: "pink",
-  
+
     },
     {
       title: "Assigned to Recruiters",
@@ -180,7 +156,7 @@ export default function DmDashboard() {
           </div>
         </div>
 
-       
+
       </div>
 
       {/* Recent Requirements */}
@@ -198,11 +174,11 @@ export default function DmDashboard() {
             <div className="h-14 bg-gray-100 rounded-lg animate-pulse"></div>
             <div className="h-14 bg-gray-100 rounded-lg animate-pulse mt-3"></div>
           </>
-        ) : recentRequirements.length === 0 ? (
+        ) : recentReqs.length === 0 ? (
           <p className="text-gray-500">No recent requirements found.</p>
         ) : (
           <div className="space-y-3">
-            {recentRequirements.map((r) => (
+            {recentReqs.map((r) => (
               <div
                 key={r.id}
                 className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition"
@@ -229,11 +205,10 @@ export default function DmDashboard() {
                 {/* Right */}
                 <div className="flex items-center gap-4">
                   <span
-                    className={`px-3 py-1 rounded-full text-sm ${
-                      r.status === "Open"
-                        ? "bg-green-100 text-green-700"
-                        : "bg-yellow-100 text-yellow-700"
-                    }`}
+                    className={`px-3 py-1 rounded-full text-sm ${r.status === "Open"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-yellow-100 text-yellow-700"
+                      }`}
                   >
                     {r.status}
                   </span>
