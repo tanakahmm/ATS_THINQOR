@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import { fetchUserDetails } from "../auth/authSlice";
 
 export default function RecruiterDashboard() {
+  const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { user } = useSelector((state) => state.auth);
+  // We use the global 'user' for ID, but fetch detailed info into 'userDetails'
+  const { user, userDetails } = useSelector((state) => state.auth);
 
   const [requirements, setRequirements] = useState([]);
   const [candidates, setCandidates] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState("");
 
@@ -29,7 +31,7 @@ export default function RecruiterDashboard() {
     if (user?.id) {
       loadUserSummary();
     }
-  }, [user]);
+  }, [user, dispatch]);
 
   const handleCreateCandidate = () => {
     const searchParams = new URLSearchParams({ recruiterId: user?.id || "" });
@@ -40,41 +42,36 @@ export default function RecruiterDashboard() {
 
   const loadUserSummary = async () => {
     if (!user?.id) return;
-
     try {
-      setSummaryError("");
       setLoadingSummary(true);
-
-      const res = await fetch(
-        `http://localhost:5001/users/${user.id}/details`
-      );
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to load user details");
-      }
-
-      setSummary(data);
-      if (Array.isArray(data.assigned_requirements)) {
-        setRequirements(data.assigned_requirements);
-      } else {
-        setRequirements([]);
-      }
-
-      if (Array.isArray(data.created_candidates)) {
-        setCandidates(data.created_candidates);
-      } else {
-        setCandidates([]);
-      }
+      setSummaryError("");
+      await dispatch(fetchUserDetails(user.id)).unwrap();
     } catch (err) {
       console.error("Summary load error:", err);
-      setSummaryError(err.message || "Unable to load your details right now.");
-      setRequirements([]);
-      setCandidates([]);
+      setSummaryError(err.message || "Unable to load details.");
     } finally {
       setLoadingSummary(false);
     }
   };
+
+  // Sync redux details to local state for compatibility
+  useEffect(() => {
+    if (userDetails) {
+      if (Array.isArray(userDetails.assigned_requirements)) {
+        setRequirements(userDetails.assigned_requirements);
+      } else {
+        setRequirements([]);
+      }
+
+      if (Array.isArray(userDetails.created_candidates)) {
+        setCandidates(userDetails.created_candidates);
+      } else {
+        setCandidates([]);
+      }
+    }
+  }, [userDetails]);
+
+  const summary = userDetails; // Use redux state directly for summary
 
   const candidateColumns = useMemo(
     () => [

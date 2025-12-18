@@ -82,6 +82,23 @@ export const getUsers = createAsyncThunk(
 );
 
 // ------------------------------------------------------------------
+// GET ROLES
+// ------------------------------------------------------------------
+export const fetchRoles = createAsyncThunk(
+  "auth/fetchRoles",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await axios.get(`${API_URL}/roles`);
+      return response.data.roles || response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "Failed to fetch roles."
+      );
+    }
+  }
+);
+
+// ------------------------------------------------------------------
 // LOGOUT
 // ------------------------------------------------------------------
 export const logoutUser = createAsyncThunk("auth/logoutUser", async () => {
@@ -140,6 +157,25 @@ export const assignRequirement = createAsyncThunk(
   }
 );
 
+
+// ------------------------------------------------------------------
+// UPDATE REQUIREMENT
+// ------------------------------------------------------------------
+export const updateRequirement = createAsyncThunk(
+  "requirements/updateRequirement",
+  async ({ id, data }, { rejectWithValue }) => {
+    try {
+      const res = await axios.put(`${API_URL}/update-requirement/${id}`, data, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.error || "Failed to update requirement"
+      );
+    }
+  }
+);
 
 // --------------------------------------------------------
 // DELETE REQUIREMENT
@@ -572,6 +608,68 @@ export const fetchCandidateProgress = createAsyncThunk(
   }
 );
 
+export const fetchCandidateProgressDetails = createAsyncThunk(
+  "candidates/fetchProgressDetails",
+  async ({ candidateId, requirementId }, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(
+        `${API_URL}/api/candidate-progress/${candidateId}/${requirementId}`
+      );
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch details");
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// DASHBOARD STATS & USER DETAILS
+// ------------------------------------------------------------------
+export const fetchDashboardStats = createAsyncThunk(
+  "dashboard/fetchStats",
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/dashboard-stats`);
+      const s = res.data?.stats || res.data?.data || {};
+      return {
+        total: s.totalRequirements ?? 0,
+        open: s.openRequirements ?? 0,
+        closed: s.closedRequirements ?? 0,
+        assigned: s.assignedRequirements ?? 0,
+        urgent: s.urgent ?? 0,
+        closedGrowthPercent: s.closedGrowthPercent ?? 0,
+        pendingReview: s.pendingReview ?? 0,
+      };
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch stats");
+    }
+  }
+);
+
+export const fetchRecentRequirements = createAsyncThunk(
+  "dashboard/fetchRecentRequirements",
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/recent-requirements`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch recent requirements");
+    }
+  }
+);
+
+export const fetchUserDetails = createAsyncThunk(
+  "users/fetchUserDetails",
+  async (userId, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/users/${userId}/details`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch user details");
+    }
+  }
+);
+
 
 // ------------------------------------------------------------------
 // INITIAL STATE
@@ -581,6 +679,10 @@ const initialState = {
   usersList: [], // For admin getUsers
   requirements: [],
   clients: [],
+  roles: [], // roles
+  dashboardStats: {}, // dashboard
+  recentRequirements: [], // dashboard
+  userDetails: null, // recruiter dashboard
   candidates: [], // For candidates list
   loading: false,
   error: null,
@@ -788,6 +890,18 @@ const authSlice = createSlice({
       .addCase(fetchRecruiters.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
+      })
+      .addCase(fetchRoles.fulfilled, (state, action) => {
+        state.roles = action.payload;
+      })
+      .addCase(fetchDashboardStats.fulfilled, (state, action) => {
+        state.dashboardStats = action.payload;
+      })
+      .addCase(fetchRecentRequirements.fulfilled, (state, action) => {
+        state.recentRequirements = action.payload;
+      })
+      .addCase(fetchUserDetails.fulfilled, (state, action) => {
+        state.userDetails = action.payload;
       })
       // DELETE CANDIDATE
       .addCase(deleteCandidate.pending, (s) => { s.loading = true; s.error = null; })

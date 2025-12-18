@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-
-const API_BASE = "http://localhost:5001";
+import { useDispatch } from "react-redux";
+import { fetchCandidateProgressDetails } from "../auth/authSlice";
 
 export default function CandidateTracking() {
+  const dispatch = useDispatch();
   const { candidateId, requirementId } = useParams();
   const navigate = useNavigate();
   const [details, setDetails] = useState(null);
@@ -14,17 +13,13 @@ export default function CandidateTracking() {
     const fetchProgress = async () => {
       try {
         setLoading(true);
-        const res = await fetch(
-          `${API_BASE}/api/candidate-progress/${candidateId}/${requirementId}`
-        );
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || "Failed to load candidate progress");
-        }
+        const data = await dispatch(
+          fetchCandidateProgressDetails({ candidateId, requirementId })
+        ).unwrap();
         setDetails(data);
       } catch (err) {
         console.error("Progress fetch error:", err);
-        setError(err.message || "Unable to load candidate tracking.");
+        setError(err || "Unable to load candidate tracking.");
       } finally {
         setLoading(false);
       }
@@ -33,7 +28,7 @@ export default function CandidateTracking() {
     if (candidateId && requirementId) {
       fetchProgress();
     }
-  }, [candidateId, requirementId]);
+  }, [candidateId, requirementId, dispatch]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">

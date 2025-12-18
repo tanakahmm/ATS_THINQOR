@@ -7,6 +7,7 @@ import {
   updateUser,
   deleteUser,
   clearMessages,
+  fetchRoles
 } from "../auth/authSlice";
 
 /**
@@ -45,24 +46,18 @@ export default function Users() {
 
   // fetch roles dynamically from backend
   useEffect(() => {
-    let mounted = true;
-    fetch(`${API_BASE}/roles`)
-      .then((res) => res.json())
+    dispatch(fetchRoles())
+      .unwrap()
       .then((data) => {
-        if (!mounted) return;
         if (Array.isArray(data)) setRoles(data);
         else if (data && Array.isArray(data.roles)) setRoles(data.roles);
         else setRoles([]);
       })
       .catch((err) => {
         console.error("Failed to load roles:", err);
-        if (mounted) setRoles([]);
+        setRoles([]);
       });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  }, [dispatch]);
 
   // auto clear messages
   useEffect(() => {
