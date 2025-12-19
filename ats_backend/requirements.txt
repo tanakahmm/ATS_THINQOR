@@ -1,6 +1,7 @@
-mysql-connector-python
+
 flask
 flask-cors
-mysql.connector
+pymysql
+cryptography
 dotenv
 requests

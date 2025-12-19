@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
 
-import mysql.connector
-from mysql.connector import Error
+import pymysql
+import pymysql.cursors
+from pymysql.err import Error
 
 try:
     # Ensure DB_* env vars from config.env/.env are loaded
@@ -23,8 +24,9 @@ if load_dotenv:
 # -------------------------------------
 # Database connection configuration
 # -------------------------------------
-import mysql.connector
-from mysql.connector import Error
+import pymysql
+import pymysql.cursors
+from pymysql.err import Error
 import time
 
 # -------------------------------------
@@ -41,7 +43,7 @@ def get_db_config():
         "password": os.getenv("DB_PASSWORD", "5757"),
         "database": os.getenv("DB_NAME", "ats_system"),
         "autocommit": False,
-        "use_pure": False # Use C extension if available for performance
+        # "use_pure": False # pymysql does not use this
     }
 
 
@@ -49,7 +51,7 @@ def get_db_config():
 
 class RobustConnection:
     """
-    A wrapper around the mysql.connector connection to handle:
+    A wrapper around the pymysql connection to handle:
     1. Automatic reconnection on timeout/error.
     2. Preventing premature closure by 'with' blocks or explicit .close() calls.
     """
@@ -64,7 +66,7 @@ class RobustConnection:
         while retries > 0:
             try:
                 print("🔌 Connecting to Database...")
-                self._conn = mysql.connector.connect(**self.config)
+                self._conn = pymysql.connect(**self.config)
                 print("✅ Database Connected Successfully")
                 return
             except Error as e:
@@ -91,8 +93,11 @@ class RobustConnection:
     def cursor(self, *args, **kwargs):
         """Get a cursor, ensuring connection is alive first."""
         self.ping(reconnect=True)
-        # return self._conn.cursor(*args, **kwargs)
-        # Override close behavior of the cursor if needed, but usually standard cursor is fine
+        
+        # Handle dictionary=True compatibility for pymysql
+        if kwargs.pop('dictionary', False):
+             kwargs['cursor'] = pymysql.cursors.DictCursor
+             
         return self._conn.cursor(*args, **kwargs)
 
     def commit(self):
@@ -110,6 +115,12 @@ class RobustConnection:
         """
         # print("🛡️ Ignoring request to close persistent DB connection.")
         pass
+
+    def is_connected(self):
+        """Compatibility method for mysql-connector."""
+        if not self._conn:
+            return False
+        return self._conn.open
 
     def force_close(self):
         """Actually close the connection (for app shutdown)."""

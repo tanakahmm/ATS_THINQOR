@@ -4,8 +4,9 @@ from typing import Any, Dict, List, Optional, Tuple
 # It reuses the existing DB connection factory from the Flask app without altering models.
 
 import os
-import mysql.connector
-from mysql.connector import Error
+import pymysql
+import pymysql.cursors
+from pymysql.err import Error
 from pathlib import Path
 
 # Load environment variables (same as app.py)
@@ -23,13 +24,13 @@ except ImportError:
 def get_db_connection():
 
 	try:
-		connection = mysql.connector.connect(
+		connection = pymysql.connect(
 			host=os.getenv('DB_HOST', 'localhost'),
 			user=os.getenv('DB_USER', 'root'),
 			password=os.getenv('DB_PASSWORD', ''),
 			database=os.getenv('DB_NAME', 'ats_system')
 		)
-		if connection.is_connected():
+		if connection.open:
 			return connection
 	except Error as e:
 		print("❌ AI service DB connection failed:", e)
@@ -44,7 +45,7 @@ def _fetch_one(query: str, params: Tuple[Any, ...]) -> Optional[Dict[str, Any]]:
 	conn = get_db_connection()
 	if not conn:
 		return None
-	cursor = conn.cursor(dictionary=True)
+	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
 	try:
 		cursor.execute(query, params)
 		row = cursor.fetchone()
@@ -59,7 +60,7 @@ def _fetch_all(query: str, params: Tuple[Any, ...]) -> List[Dict[str, Any]]:
 	conn = get_db_connection()
 	if not conn:
 		return []
-	cursor = conn.cursor(dictionary=True)
+	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
 	try:
 		cursor.execute(query, params)
 		rows = cursor.fetchall()
@@ -549,7 +550,7 @@ def get_org_stats_snapshot() -> Dict[str, int]:
 	conn = get_db_connection()
 	if not conn:
 		return stats
-	cursor = conn.cursor(dictionary=True)
+	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
 	try:
 		cursor.execute("SELECT COUNT(*) AS total_requirements FROM requirements")
 		stats["total_requirements"] = cursor.fetchone().get("total_requirements", 0)
@@ -682,7 +683,7 @@ def get_tracking_stats_for_requirement(requirement_id: str, user: UserDict) -> D
 	if not conn:
 		return {}
 	
-	cursor = conn.cursor(dictionary=True)
+	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
 	try:
 		# Get total candidates screened
 		cursor.execute(
