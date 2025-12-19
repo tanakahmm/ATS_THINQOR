@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
-import mysql.connector
-from mysql.connector import Error
+import pymysql
+from pymysql.err import Error, IntegrityError
 from flask_cors import CORS
 import uuid
 import os
@@ -787,7 +787,7 @@ def create_user():
 
         return jsonify({"message": f"✅ User '{name}' created successfully!"}), 201
 
-    except mysql.connector.IntegrityError:
+    except IntegrityError:
         return jsonify({"message": "⚠️ Email already exists!"}), 409
     except Exception as e:
         return jsonify({"message": "❌ Error creating user", "error": str(e)}), 500
