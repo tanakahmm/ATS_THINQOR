@@ -85,7 +85,7 @@ class RobustConnection:
             if self._conn is None:
                 self._connect()
             else:
-                self._conn.ping(reconnect=reconnect, attempts=attempts, delay=delay)
+                self._conn.ping(reconnect=reconnect)
         except Exception as e:
             print(f"⚠️ Ping failed, attempting reconnect: {e}")
             self._connect()

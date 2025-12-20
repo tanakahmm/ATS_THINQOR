@@ -693,7 +693,6 @@ def get_users():
 
         cursor = conn.cursor(dictionary=True)
 
-        # Fetch users with fallback to usersdata
         cursor.execute("""
             SELECT 
                 u.id,
@@ -702,13 +701,32 @@ def get_users():
                 COALESCE(u.phone, ud.phone) AS phone,
                 u.role,
                 COALESCE(u.status, 'ACTIVE') AS status,
-                u.created_at
+                u.created_at,
+                'REGISTERED' as account_type
             FROM users u
             LEFT JOIN usersdata ud ON ud.email = u.email
-            ORDER BY u.created_at DESC
+
+            UNION ALL
+
+            SELECT 
+                ud.id,
+                ud.name,
+                ud.email,
+                ud.phone,
+                ud.role,
+                'PENDING' as status,
+                ud.created_at,
+                'INVITED' as account_type
+            FROM usersdata ud
+            WHERE ud.email NOT IN (SELECT email FROM users)
+            ORDER BY created_at DESC
         """)
 
         users = cursor.fetchall()
+        
+        # Handle ID conflicts for frontend (optional, but good practice)
+        # We can prefix IDs or just rely on react keys being smart enough or using email as key
+        # For now, we return as is.
 
         cursor.close()
         conn.close()
@@ -1018,8 +1036,14 @@ def signup():
         cursor = conn.cursor(dictionary=True)
 
         # 1️⃣ Check if email exists in usersdata table (created by admin)
+        print(f"🔍 Signup: Checking invalid/invite list for email '{email}'")
         cursor.execute("SELECT * FROM usersdata WHERE email = %s", (email,))
         existing_user = cursor.fetchone()
+        
+        if existing_user:
+             print(f"✅ Found invite for '{email}': {existing_user}")
+        else:
+             print(f"❌ No invite found for '{email}' in usersdata")
 
         if not existing_user:
             cursor.close()
