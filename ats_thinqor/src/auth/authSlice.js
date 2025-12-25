@@ -564,6 +564,20 @@ export const updateStageStatus = createAsyncThunk(
   }
 );
 
+export const assignCandidateToRequirement = createAsyncThunk(
+  "candidates/assignCandidateToRequirement",
+  async ({ candidate_id, requirement_id }, { rejectWithValue }) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/assign-candidate`, { candidate_id, requirement_id }, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to assign candidate");
+    }
+  }
+);
+
 // ------------------------------------------------------------------
 // FETCH ALLOCATIONS
 // ------------------------------------------------------------------

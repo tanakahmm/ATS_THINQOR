@@ -22,9 +22,9 @@ def screen_candidate():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
-
-        # Removed _ensure_screening_tables(cursor) as tables are handled in app.py
+        
+        # PyMySQL DictCursor is already set in get_db_connection
+        cursor = conn.cursor()
 
         cursor.execute("SELECT * FROM candidates WHERE id = %s", (candidate_id,))
         candidate = cursor.fetchone()
@@ -36,67 +36,108 @@ def screen_candidate():
         if not requirement:
             return jsonify({"error": "Requirement not found"}), 404
 
-        ai_output = run_gemini_screening(candidate, requirement)
-        normalized_output, normalize_error = _normalize_ai_output(ai_output)
-        if normalize_error:
-            return jsonify({"error": normalize_error, "raw_output": str(ai_output)}), 500
-
-        cursor.execute("""
-            INSERT INTO candidate_screening
-            (candidate_id, requirement_id, ai_score, ai_rationale, recommend, red_flags, model_version)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            candidate_id,
-            requirement["id"],
-            normalized_output["score"],
-            json.dumps(normalized_output["rationale"]),
-            normalized_output["recommend"],
-            json.dumps(normalized_output["red_flags"]),
-            "gemini-2.5"
-        ))
-        conn.commit()
-
-        _touch_candidate_progress(
-            cursor,
-            candidate_id,
-            requirement["id"],
-            requirement.get("category", "IT"),
-            stage="Manual Review",
-            status="REVIEW_REQUIRED",
-            decision="NONE"
-        )
-        conn.commit()
-
-        # Check if assesment_queue table exists before inserting
-        cursor.execute("SHOW TABLES LIKE 'assesment_queue'")
-        if cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO assesment_queue (candidate_id, requirement_id, status)
-                VALUES (%s, %s, 'PENDING')
-            """, (candidate_id, requirement["id"]))
-            conn.commit()
+        # --- AI Screening ---
+        ai_success = False
+        ai_error_msg = None
+        normalized_output = {}
 
         try:
-            requests.post(
-                "http://localhost:5678/webhook/screen_complete",
-                json={
-                    "candidate_id": candidate_id,
-                    "requirement_id": requirement["id"],
-                    "ai_score": normalized_output["score"],
-                    "recommend": normalized_output["recommend"]
-                },
-                timeout=3
+            ai_output = run_gemini_screening(candidate, requirement)
+            normalized_output, normalize_error = _normalize_ai_output(ai_output)
+            if normalize_error:
+                ai_error_msg = normalize_error
+            else:
+                ai_success = True
+        except Exception as ai_e:
+            ai_error_msg = str(ai_e)
+            print(f"⚠️ Gemini screening failed: {ai_e}")
+
+        # --- Tracker / Progress Update (RUNS EVEN IF AI FAILS) ---
+        
+        # 1. Insert Screening Record (only if success, or maybe partial?)
+        # For now, we only insert screening record if AI succeeded, 
+        # but we ALWAYS update candidate_progress to avoid "hanging" state.
+        
+        if ai_success:
+            cursor.execute("""
+                INSERT INTO candidate_screening
+                (candidate_id, requirement_id, ai_score, ai_rationale, recommend, red_flags, model_version)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                candidate_id,
+                requirement["id"],
+                normalized_output["score"],
+                json.dumps(normalized_output["rationale"]),
+                normalized_output["recommend"],
+                json.dumps(normalized_output["red_flags"]),
+                "gemini-2.5"
+            ))
+            
+            # Update progress for success case
+            _touch_candidate_progress(
+                cursor,
+                candidate_id,
+                requirement["id"],
+                requirement.get("category", "IT"),
+                stage="Manual Review",
+                status="REVIEW_REQUIRED",
+                decision="NONE"
             )
-        except requests.RequestException:
-            print("⚠️ Could not send event to n8n (server offline).")
+            
+            # Queue for assessment
+            cursor.execute("SHOW TABLES LIKE 'assesment_queue'")
+            if cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO assesment_queue (candidate_id, requirement_id, status)
+                    VALUES (%s, %s, 'PENDING')
+                """, (candidate_id, requirement["id"]))
+                
+        else:
+            # AI Failed Case - Update tracker to indicate failure/manual need
+            print(f"⚠️ Updating tracker for failed screening: {ai_error_msg}")
+            _touch_candidate_progress(
+                cursor,
+                candidate_id,
+                requirement["id"],
+                requirement.get("category", "IT"),
+                stage="Screening Failed", 
+                status="REVIEW_REQUIRED",  # Valid ENUM
+                decision="HOLD"            # Valid ENUM (instead of RETRY_NEEDED)
+            )
+
+        conn.commit()
+        
+        # Webhook Notification (Best Effort)
+        if ai_success:
+            try:
+                requests.post(
+                    "http://localhost:5678/webhook/screen_complete",
+                    json={
+                        "candidate_id": candidate_id,
+                        "requirement_id": requirement["id"],
+                        "ai_score": normalized_output.get("score"),
+                        "recommend": normalized_output.get("recommend")
+                    },
+                    timeout=3
+                )
+            except requests.RequestException:
+                print("⚠️ Could not send event to n8n (server offline).")
 
         cursor.close()
         conn.close()
 
-        return jsonify({
-            "message": "✅ Candidate screened successfully!",
-            "result": normalized_output
-        }), 200
+        if ai_success:
+            return jsonify({
+                "message": "✅ Candidate screened successfully!",
+                "result": normalized_output
+            }), 200
+        else:
+            # Return success (200) even if AI failed, because we successfully created a manual tracker entry.
+            # This allows the frontend to refresh and show the "Screening Failed" status in the tracker.
+            return jsonify({
+                "message": f"⚠️ AI Screening failed ({ai_error_msg}), but tracker was created for manual review.",
+                "result": {"score": 0, "recommend": "MANUAL_REVIEW"} 
+            }), 200
 
     except Exception as e:
         print("❌ Screening error:", e)
@@ -125,7 +166,7 @@ def create_interview():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        cursor = conn.cursor()
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -174,7 +215,7 @@ def get_interviews():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        cursor = conn.cursor()
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -212,7 +253,7 @@ def update_stage():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        cursor = conn.cursor()
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -260,7 +301,7 @@ def recruiter_decision():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        cursor = conn.cursor()
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -331,13 +372,59 @@ def recruiter_decision():
         return jsonify({"error": str(e)}), 500
 
 
+@screening_bp.route("/assign-candidate", methods=["POST"])
+def assign_candidate():
+    try:
+        data = request.json or {}
+        candidate_id = data.get("candidate_id")
+        requirement_ref = data.get("requirement_id")
+
+        if not candidate_id or not requirement_ref:
+            return jsonify({"error": "candidate_id and requirement_id are required"}), 400
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+        cursor = conn.cursor()
+
+        requirement = _resolve_requirement(cursor, requirement_ref)
+        if not requirement:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Requirement not found"}), 404
+
+        # check if already exists to avoid overwriting existing progress if somehow called duplicately
+        # But _touch_candidate_progress handles updates. We want to initialize it.
+        # If it exists, we might not want to reset it unless user explicit. 
+        # For now, we'll just ensure it exists.
+        
+        _touch_candidate_progress(
+            cursor,
+            candidate_id,
+            requirement["id"],
+            requirement.get("category", "IT"),
+            stage="Manual Assignment",
+            status="PENDING",
+            decision="NONE"
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "✅ Candidate manually assigned to requirement!"}), 200
+
+    except Exception as e:
+        print("❌ assign_candidate error:", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @screening_bp.route("/candidate-progress/<int:candidate_id>/<req_ref>", methods=["GET"])
 def get_candidate_progress(candidate_id, req_ref):
     try:
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        cursor = conn.cursor()
 
         # Removed _ensure_screening_tables(cursor)
 

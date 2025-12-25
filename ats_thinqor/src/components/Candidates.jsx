@@ -10,7 +10,8 @@ import {
   deleteCandidate,
   screenCandidate,
   fetchCandidateTracker,
-  updateStageStatus
+  updateStageStatus,
+  assignCandidateToRequirement
 } from "../auth/authSlice";
 
 /**
@@ -321,19 +322,119 @@ function TrackerModal({
   trackerData,
   trackCandidate,
   updateStageStatus,
+  // New props for assignment
+  requirements,
+  assignCandidateToRequirement,
+  dispatch,
 }) {
+  const [showAssignForm, setShowAssignForm] = useState(false);
+  const [assignSearch, setAssignSearch] = useState("");
+  const [selectedAssignReqId, setSelectedAssignReqId] = useState("");
+  const [assignLoading, setAssignLoading] = useState(false);
+
+  // Reset local state when modal opens/closes
+  useEffect(() => {
+    if (trackerModalOpen) {
+      setShowAssignForm(false);
+      setAssignSearch("");
+      setSelectedAssignReqId("");
+    }
+  }, [trackerModalOpen]);
+
+  // Filter requirements for assignment
+  const filteredAssignReqs = useMemo(() => {
+    if (!assignSearch) return requirements || [];
+    return (requirements || []).filter((req) =>
+      `${req.title} ${req.location}`.toLowerCase().includes(assignSearch.toLowerCase())
+    );
+  }, [requirements, assignSearch]);
+
+  const handleAssign = async () => {
+    if (!selectedAssignReqId) return alert("Select a requirement first.");
+    setAssignLoading(true);
+    try {
+      const resultAction = await dispatch(assignCandidateToRequirement({
+        candidate_id: trackCandidate.id,
+        requirement_id: selectedAssignReqId
+      }));
+      if (assignCandidateToRequirement.fulfilled.match(resultAction)) {
+        // Refresh tracker
+        setShowAssignForm(false);
+        // The parent component should re-fetch tracker data, but we can trigger it or let the user do it.
+        // Better to trigger a refresh via a prop if possible, or just close and let them reopen?
+        // Ideally, we re-fetch immediately.
+        // We can't easily refetch here without imports. 
+        // Strategy: Close the form and show success. The parent logic might need adjustment to refetch.
+        alert("✅ Tracker created!");
+
+        // Trigger refresh from parent would be ideal, but for now we'll just close 
+        // and maybe the parent listens to state changes? 
+        // Actually, let's just close the assignment form. The main list remains.
+      } else {
+        alert(resultAction.payload || "Failed to assign");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error assigning");
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
   if (!trackerModalOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-10 relative max-h-[90vh] overflow-y-auto">
         <button onClick={() => setTrackerModalOpen(false)} className="absolute right-4 top-4 text-gray-600 hover:text-gray-800 text-xl">✕</button>
 
-        <h3 className="text-3xl font-bold mb-10 text-gray-900">Candidate Interview Tracking</h3>
+        <h3 className="text-3xl font-bold mb-6 text-gray-900">Candidate Interview Tracking</h3>
+
+        {/* Manual Assignment Section Toggle */}
+        <div className="mb-6 flex justify-end">
+          <button
+            onClick={() => setShowAssignForm(!showAssignForm)}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 transition"
+          >
+            {showAssignForm ? "Cancel Assignment" : "+ Link to Requirement"}
+          </button>
+        </div>
+
+        {/* Assignment Form */}
+        {showAssignForm && (
+          <div className="mb-8 p-6 bg-indigo-50 rounded-xl border border-indigo-100">
+            <h4 className="text-lg font-semibold mb-3">Manually Link to Requirement</h4>
+            <input
+              type="text"
+              placeholder="Search Requirement..."
+              className="w-full p-2 mb-3 border rounded"
+              value={assignSearch}
+              onChange={e => setAssignSearch(e.target.value)}
+            />
+            <div className="max-h-48 overflow-y-auto bg-white border rounded mb-3">
+              {filteredAssignReqs.map(req => (
+                <div
+                  key={req.id}
+                  className={`p-2 cursor-pointer hover:bg-indigo-50 ${selectedAssignReqId === req.id ? 'bg-indigo-100 font-semibold' : ''}`}
+                  onClick={() => setSelectedAssignReqId(req.id)}
+                >
+                  {req.title} <span className="text-gray-500 text-xs">({req.location})</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={handleAssign}
+              disabled={assignLoading}
+              className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 disabled:opacity-50"
+            >
+              {assignLoading ? "Linking..." : "Confirm Link"}
+            </button>
+          </div>
+        )}
 
         {trackerLoading ? (
           <p className="text-center text-gray-500 py-12 text-lg">Loading...</p>
         ) : trackerData.length === 0 ? (
-          <p className="text-center text-gray-500 py-12 text-lg">No tracking found.</p>
+          <p className="text-center text-gray-500 py-12 text-lg">No tracking found. Link a requirement above.</p>
         ) : (
           <div className="space-y-12">
             {trackerData.map((item, idx) => (
@@ -366,6 +467,7 @@ function TrackerModal({
                             <option value="IN_PROGRESS">In Progress</option>
                             <option value="COMPLETED">Completed</option>
                             <option value="REJECTED">Rejected</option>
+                            <option value="REVIEW_REQUIRED">Review Required</option>
                           </select>
                         </div>
                       </div>
@@ -705,6 +807,9 @@ export default function CandidateApplicationUI() {
         trackerData={trackerData}
         trackCandidate={trackCandidateData}
         updateStageStatus={handleUpdateStageStatus}
+        requirements={requirements}
+        assignCandidateToRequirement={assignCandidateToRequirement}
+        dispatch={dispatch}
       />
     </div>
   );
