@@ -20,21 +20,8 @@ try:
 except ImportError:
 	pass  # dotenv not available, use system env vars
 
-
-def get_db_connection():
-
-	try:
-		connection = pymysql.connect(
-			host=os.getenv('DB_HOST', 'localhost'),
-			user=os.getenv('DB_USER', 'root'),
-			password=os.getenv('DB_PASSWORD', ''),
-			database=os.getenv('DB_NAME', 'ats_system')
-		)
-		if connection.open:
-			return connection
-	except Error as e:
-		print("❌ AI service DB connection failed:", e)
-		return None
+# Use the centralized, robust DB connection from utils.db
+from utils.db import get_db_connection
 
 
 UserDict = Dict[str, Any]
@@ -45,14 +32,15 @@ def _fetch_one(query: str, params: Tuple[Any, ...]) -> Optional[Dict[str, Any]]:
 	conn = get_db_connection()
 	if not conn:
 		return None
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
+	# RobustConnection handles dictionary=True
+	cursor = conn.cursor(dictionary=True)
 	try:
 		cursor.execute(query, params)
 		row = cursor.fetchone()
 		return dict(row) if row else None
 	finally:
+		# RobustConnection.close() is a no-op for persistence, checking valid hygiene
 		cursor.close()
-		conn.close()
 
 
 def _fetch_all(query: str, params: Tuple[Any, ...]) -> List[Dict[str, Any]]:
@@ -60,14 +48,13 @@ def _fetch_all(query: str, params: Tuple[Any, ...]) -> List[Dict[str, Any]]:
 	conn = get_db_connection()
 	if not conn:
 		return []
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
+	cursor = conn.cursor(dictionary=True)
 	try:
 		cursor.execute(query, params)
 		rows = cursor.fetchall()
 		return [dict(r) for r in rows] if rows else []
 	finally:
 		cursor.close()
-		conn.close()
 
 
 def _is_admin(user: UserDict) -> bool:
@@ -550,7 +537,7 @@ def get_org_stats_snapshot() -> Dict[str, int]:
 	conn = get_db_connection()
 	if not conn:
 		return stats
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
+	cursor = conn.cursor(dictionary=True)
 	try:
 		cursor.execute("SELECT COUNT(*) AS total_requirements FROM requirements")
 		stats["total_requirements"] = cursor.fetchone().get("total_requirements", 0)
@@ -570,7 +557,6 @@ def get_org_stats_snapshot() -> Dict[str, int]:
 		return stats
 	finally:
 		cursor.close()
-		conn.close()
 
 
 def build_user_self_context(user: UserDict) -> Dict[str, Any]:
@@ -683,7 +669,7 @@ def get_tracking_stats_for_requirement(requirement_id: str, user: UserDict) -> D
 	if not conn:
 		return {}
 	
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
+	cursor = conn.cursor(dictionary=True)
 	try:
 		# Get total candidates screened
 		cursor.execute(
@@ -737,6 +723,3 @@ def get_tracking_stats_for_requirement(requirement_id: str, user: UserDict) -> D
 		}
 	finally:
 		cursor.close()
-		conn.close()
-
-

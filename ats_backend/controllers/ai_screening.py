@@ -1,8 +1,12 @@
 from flask import Blueprint, request, jsonify
 from utils.gemini import run_gemini_screening
-from services.ai_data_service import get_db_connection
+from utils.db import get_db_connection
 import requests
 import json
+import traceback
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 screening_bp = Blueprint('screening', __name__, url_prefix="/api")
 
@@ -22,7 +26,8 @@ def screen_candidate():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        # RobustConnection handles dictionary=True, removed incompatible buffered=True
+        cursor = conn.cursor(dictionary=True)
 
         # Removed _ensure_screening_tables(cursor) as tables are handled in app.py
 
@@ -52,7 +57,7 @@ def screen_candidate():
             json.dumps(normalized_output["rationale"]),
             normalized_output["recommend"],
             json.dumps(normalized_output["red_flags"]),
-            "gemini-2.5"
+            "gemini-2.5-flash"
         ))
         conn.commit()
 
@@ -76,19 +81,24 @@ def screen_candidate():
             """, (candidate_id, requirement["id"]))
             conn.commit()
 
-        try:
-            requests.post(
-                "http://localhost:5678/webhook/screen_complete",
-                json={
-                    "candidate_id": candidate_id,
-                    "requirement_id": requirement["id"],
-                    "ai_score": normalized_output["score"],
-                    "recommend": normalized_output["recommend"]
-                },
-                timeout=3
-            )
-        except requests.RequestException:
-            print("⚠️ Could not send event to n8n (server offline).")
+        # Non-blocking N8N notification
+        def _notify_n8n():
+            try:
+                requests.post(
+                    "http://localhost:5678/webhook/screen_complete",
+                    json={
+                        "candidate_id": candidate_id,
+                        "requirement_id": requirement["id"],
+                        "ai_score": normalized_output["score"],
+                        "recommend": normalized_output["recommend"]
+                    },
+                    timeout=1  # Short timeout
+                )
+            except Exception as e:
+                logger.warning(f"N8N webhook failed: {e}")
+
+        import threading
+        threading.Thread(target=_notify_n8n, daemon=True).start()
 
         cursor.close()
         conn.close()
@@ -99,7 +109,8 @@ def screen_candidate():
         }), 200
 
     except Exception as e:
-        print("❌ Screening error:", e)
+        logger.error(f"Screening error: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
@@ -125,7 +136,8 @@ def create_interview():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        # RobustConnection handles dictionary=True, removed incompatible buffered=True
+        cursor = conn.cursor(dictionary=True)
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -164,7 +176,7 @@ def create_interview():
         return jsonify({"status": "success"}), 201
 
     except Exception as e:
-        print("❌ create_interview error:", e)
+        logger.error(f"create_interview error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -174,7 +186,8 @@ def get_interviews():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        # RobustConnection handles dictionary=True, removed incompatible buffered=True
+        cursor = conn.cursor(dictionary=True)
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -196,7 +209,7 @@ def get_interviews():
         conn.close()
         return jsonify(rows), 200
     except Exception as e:
-        print("❌ get_interviews error:", e)
+        logger.error(f"get_interviews error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -212,7 +225,8 @@ def update_stage():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        # RobustConnection handles dictionary=True, removed incompatible buffered=True
+        cursor = conn.cursor(dictionary=True)
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -238,7 +252,7 @@ def update_stage():
 
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        print("❌ update_stage error:", e)
+        logger.error(f"update_stage error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -260,7 +274,8 @@ def recruiter_decision():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        # RobustConnection handles dictionary=True, removed incompatible buffered=True
+        cursor = conn.cursor(dictionary=True)
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -322,12 +337,12 @@ def recruiter_decision():
             )
             print("Webhook response:", resp.status_code)
         except Exception as e:
-            print("⚠️ Could not notify n8n:", e)
+            logger.warning(f"Could not notify n8n: {e}")
 
         return jsonify({"status": "updated", "decision": decision}), 200
 
     except Exception as e:
-        print("❌ recruiter_decision error:", e)
+        logger.error(f"recruiter_decision error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -337,7 +352,8 @@ def get_candidate_progress(candidate_id, req_ref):
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-        cursor = conn.cursor(dictionary=True, buffered=True)
+        # RobustConnection handles dictionary=True, removed incompatible buffered=True
+        cursor = conn.cursor(dictionary=True)
 
         # Removed _ensure_screening_tables(cursor)
 
@@ -397,7 +413,7 @@ def get_candidate_progress(candidate_id, req_ref):
             "interviews": interviews,
         }), 200
     except Exception as e:
-        print("❌ get_candidate_progress error:", e)
+        logger.error(f"get_candidate_progress error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -417,34 +433,25 @@ def _touch_candidate_progress(cursor, candidate_id, requirement_id, category, st
 
 
 def _resolve_requirement(cursor, identifier):
-    if not identifier:
-        return None
-
+    logger.info(f"Resolving requirement for identifier: {identifier}")
     cursor.execute("SELECT * FROM requirements WHERE id = %s", (str(identifier),))
     row = cursor.fetchone()
     if row:
         return row
 
+    # Try exact title match
     cursor.execute(
-        """
-        SELECT * FROM requirements
-        WHERE LOWER(title) = LOWER(%s)
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
+        "SELECT * FROM requirements WHERE LOWER(title) = LOWER(%s) ORDER BY created_at DESC LIMIT 1",
         (identifier,)
     )
     row = cursor.fetchone()
     if row:
         return row
-
+    
+    # Try fuzzy match if strictly needed, but log warning
+    logger.warning(f"No exact match for req '{identifier}', trying fuzzy search")
     cursor.execute(
-        """
-        SELECT * FROM requirements
-        WHERE LOWER(CONCAT(title, ' ', COALESCE(location, ''))) LIKE %s
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
+        "SELECT * FROM requirements WHERE LOWER(title) LIKE %s ORDER BY created_at DESC LIMIT 1",
         (f"%{identifier.lower()}%",)
     )
     return cursor.fetchone()
