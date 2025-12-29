@@ -134,7 +134,9 @@ class RobustConnection:
 
     def __getattr__(self, name):
         """Delegate other methods to the underlying connection object."""
-        self.ping(reconnect=True)
+        # Removed automatic ping() here to improve performance.
+        # Callers rely on cursor(), commit(), or explicit ping() 
+        # to ensure connectivity.
         return getattr(self._conn, name)
 
 # Thread-local storage for persistent connections per thread

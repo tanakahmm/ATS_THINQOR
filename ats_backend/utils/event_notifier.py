@@ -9,25 +9,26 @@ N8N_WEBHOOK_URL = os.getenv(
 
 def notify_event(event_name: str, payload: dict) -> None:
     """
-    Sends an event + payload to n8n webhook.
-    This should never crash your app if n8n is down.
+    Sends an event + payload to n8n webhook asynchronously.
     """
     if not N8N_WEBHOOK_URL:
-        print(f"❌ N8N_WEBHOOK_URL not set, skipping event {event_name}")
+        # print(f"❌ N8N_WEBHOOK_URL not set, skipping event {event_name}")
         return
 
-    body = {
-        "event": event_name,
-        "payload": payload,
-    }
+    def _send():
+        body = {
+            "event": event_name,
+            "payload": payload,
+        }
+        try:
+            requests.post(
+                N8N_WEBHOOK_URL,
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(body),
+                timeout=2,
+            )
+        except Exception:
+            pass # Fail silently in background
 
-    try:
-        resp = requests.post(
-            N8N_WEBHOOK_URL,
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(body),
-            timeout=5,
-        )
-        print(f"📡 Notified n8n: {event_name} (status={resp.status_code})")
-    except Exception as e:
-        print(f"❌ Failed to notify n8n for event {event_name}: {e}")
+    import threading
+    threading.Thread(target=_send, daemon=True).start()

@@ -169,6 +169,18 @@ def initialize_database():
             );
         """)
 
+        # Migration check for requirement_allocations cols
+        cursor.execute("SHOW COLUMNS FROM requirement_allocations LIKE 'status'")
+        if not cursor.fetchone():
+            print("⚠️ Adding 'status' column to requirement_allocations...")
+            cursor.execute("ALTER TABLE requirement_allocations ADD COLUMN status VARCHAR(20) DEFAULT 'ASSIGNED'")
+        
+        cursor.execute("SHOW COLUMNS FROM requirement_allocations LIKE 'created_at'")
+        if not cursor.fetchone():
+            print("⚠️ Adding 'created_at' column to requirement_allocations...")
+            cursor.execute("ALTER TABLE requirement_allocations ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        conn.commit()
+
         # ---------------------------
         # CANDIDATES TABLE
         # ---------------------------
@@ -1373,62 +1385,56 @@ def get_candidate_tracker(candidate_id):
         # The user said "after a candidate is screened... he should be visible in this track route".
         # So we should look for screening records too and maybe auto-initialize progress if missing.
 
-        # Let's just fetch requirements where we have progress OR screening
+        # Single Query to get requirements + stages + progress
+        # We join requirements with stages and then left join candidate_progress
         cursor.execute("""
-            SELECT DISTINCT r.id, r.title, r.client_id, c.name as client_name, r.no_of_rounds
+            SELECT 
+                r.id AS req_id, r.title, r.client_id, c.name AS client_name, r.no_of_rounds,
+                rs.id AS stage_id, rs.stage_order, rs.stage_name,
+                cp.status, cp.decision, cp.updated_at
             FROM requirements r
             LEFT JOIN clients c ON c.id = r.client_id
-            LEFT JOIN candidate_progress cp ON cp.requirement_id = r.id
-            LEFT JOIN candidate_screening cs ON cs.requirement_id = r.id
-            WHERE cp.candidate_id = %s OR cs.candidate_id = %s
-        """, (candidate_id, candidate_id))
+            JOIN requirement_stages rs ON rs.requirement_id = r.id
+            LEFT JOIN candidate_progress cp ON cp.stage_id = rs.id AND cp.candidate_id = %s
+            WHERE r.id IN (
+                SELECT DISTINCT requirement_id FROM candidate_progress WHERE candidate_id = %s
+                UNION
+                SELECT DISTINCT requirement_id FROM candidate_screening WHERE candidate_id = %s
+            )
+            ORDER BY r.created_at DESC, rs.stage_order ASC
+        """, (candidate_id, candidate_id, candidate_id))
         
-        requirements = cursor.fetchall()
+        rows = cursor.fetchall()
         
-        tracker_data = []
-        
-        for req in requirements:
-            req_id = req["id"]
+        # Organize data by requirement
+        tracker_map = {}
+        for row in rows:
+            rid = row["req_id"]
+            if rid not in tracker_map:
+                tracker_map[rid] = {
+                    "requirement": {
+                        "id": rid,
+                        "title": row["title"],
+                        "client_id": row["client_id"],
+                        "client_name": row["client_name"],
+                        "no_of_rounds": row["no_of_rounds"]
+                    },
+                    "stages": []
+                }
             
-            # Get Stages
-            cursor.execute("""
-                SELECT id, stage_order, stage_name 
-                FROM requirement_stages 
-                WHERE requirement_id = %s 
-                ORDER BY stage_order ASC
-            """, (req_id,))
-            stages = cursor.fetchall()
-            
-            # Get Progress for each stage
-            cursor.execute("""
-                SELECT stage_id, status, decision, updated_at
-                FROM candidate_progress
-                WHERE candidate_id = %s AND requirement_id = %s
-            """, (candidate_id, req_id))
-            progress_rows = cursor.fetchall()
-            progress_map = {row["stage_id"]: row for row in progress_rows}
-            
-            stages_with_status = []
-            for stage in stages:
-                p = progress_map.get(stage["id"], {})
-                stages_with_status.append({
-                    "stage_id": stage["id"],
-                    "stage_name": stage["stage_name"],
-                    "stage_order": stage["stage_order"],
-                    "status": p.get("status", "PENDING"),
-                    "decision": p.get("decision", "NONE"),
-                    "updated_at": p.get("updated_at")
-                })
-                
-            tracker_data.append({
-                "requirement": req,
-                "stages": stages_with_status
+            tracker_map[rid]["stages"].append({
+                "stage_id": row["stage_id"],
+                "stage_name": row["stage_name"],
+                "stage_order": row["stage_order"],
+                "status": row["status"] or "PENDING",
+                "decision": row["decision"] or "NONE",
+                "updated_at": row["updated_at"]
             })
             
         cursor.close()
         conn.close()
         
-        return jsonify(tracker_data), 200
+        return jsonify(list(tracker_map.values())), 200
         
     except Exception as e:
         print("❌ Error fetching tracker:", e)
@@ -1503,30 +1509,8 @@ def assign_requirement():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Ensure table exists with required columns
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS requirement_allocations (
-                id VARCHAR(64) PRIMARY KEY,
-                requirement_id VARCHAR(64) NOT NULL,
-                recruiter_id INT NOT NULL,
-                assigned_by INT NOT NULL,
-                status VARCHAR(20) DEFAULT 'ASSIGNED',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-
-        # Add status column if missing (legacy tables)
-        cursor.execute("SHOW COLUMNS FROM requirement_allocations LIKE 'status'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE requirement_allocations ADD COLUMN status VARCHAR(20) DEFAULT 'ASSIGNED'")
-            conn.commit()
-
-        # Add created_at column if missing
-        cursor.execute("SHOW COLUMNS FROM requirement_allocations LIKE 'created_at'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE requirement_allocations ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            conn.commit()
+        # No-op: Table creation/alteration moved to initialize_database() to avoid request-time latency.
+        pass
 
         # Validate recruiter
         cursor.execute("SELECT COUNT(*) FROM users WHERE id = %s", (recruiter_id,))

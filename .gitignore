@@ -33,3 +33,5 @@ ats_backend\uploads\resumes
 PROJECT_DOCUMENTATION.md
 DEBUG_GUIDE.md
 ENV_README.md
+
+ats_backend/config.env
