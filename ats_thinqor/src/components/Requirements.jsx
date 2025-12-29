@@ -363,6 +363,14 @@ function EditModal({ editForm, setEditForm, setShowEditModal, handleUpdateRequir
             setEditForm({ ...editForm, experience_required: e.target.value })
           }
         />
+        <textarea
+          className="border p-2 w-full mb-3 rounded h-24"
+          placeholder="Job Description"
+          value={editForm.description || ""}
+          onChange={(e) =>
+            setEditForm({ ...editForm, description: e.target.value })
+          }
+        />
         <input
           className="border p-2 w-full mb-3 rounded"
           placeholder="Skills comma separated"

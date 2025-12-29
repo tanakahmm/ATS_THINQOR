@@ -193,10 +193,11 @@ export default function CreateRequirements() {
 
         <textarea
           name="description"
-          placeholder="Job Description (Optional)"
+          placeholder="Job Description (Required)"
           value={form.description}
           onChange={handleChange}
           className="border p-2 rounded col-span-2 h-24"
+          required
         />
 
         <input name="skills_required" placeholder="Skills (comma separated)" value={form.skills_required} onChange={handleChange} className="border p-2 rounded" />

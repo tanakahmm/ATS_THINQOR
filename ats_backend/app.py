@@ -1223,7 +1223,7 @@ def create_requirement():
         req_id = str(uuid.uuid4())
 
         # Validate required fields
-        required_fields = ["client_id", "title", "location"]
+        required_fields = ["client_id", "title", "location", "description"]
         missing = []
         for field in required_fields:
             value = data.get(field)
@@ -1906,7 +1906,7 @@ def update_requirement(req_id):
     cursor.execute("""
         UPDATE requirements
         SET title=%s, location=%s, experience_required=%s,
-            skills_required=%s, ctc_range=%s, client_id=%s, status=%s
+            skills_required=%s, ctc_range=%s, client_id=%s, status=%s, description=%s
         WHERE id=%s
     """, (
         data["title"],
@@ -1916,6 +1916,7 @@ def update_requirement(req_id):
         data["ctc_range"],
         data["client_id"],
         data["status"],
+        data.get("description", ""),
         req_id
     ))
 
