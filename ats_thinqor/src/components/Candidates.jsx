@@ -197,6 +197,18 @@ function CandidateList({
                   <td className="p-4">{candidate.ectc}</td>
 
                   <td className="p-4 space-x-2">
+                    <button onClick={() => {
+                      if (candidate.resume_filename) {
+                        window.open(`http://localhost:5001/uploads/resumes/${candidate.resume_filename}`, "_blank");
+                      } else {
+                        alert("No resume uploaded for this candidate.");
+                      }
+                    }}
+                      className="px-4 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs shadow"
+                    >
+                      View
+                    </button>
+
                     <button onClick={() => handleEdit(candidate)} className="px-4 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs shadow">Edit</button>
 
                     <button onClick={() => handleDelete(candidate.id)} className="px-4 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs shadow">Delete</button>

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import pymysql
 from pymysql.err import Error, IntegrityError
 from flask_cors import CORS
@@ -2290,6 +2290,13 @@ def get_candidate_progress():
     finally:
         cursor.close()
         conn.close()
+
+# -------------------------------------
+# Serve Resumes
+# -------------------------------------
+@app.route('/uploads/resumes/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 # -------------------------------------
 # Run Server
