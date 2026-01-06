@@ -554,10 +554,15 @@ export default function CandidateApplicationUI() {
   // -------------------------------
   // FETCH CANDIDATES + REQUIREMENTS
   // -------------------------------
+  // -------------------------------
+  // FETCH CANDIDATES + REQUIREMENTS
+  // -------------------------------
   useEffect(() => {
-    dispatch(fetchCandidates());
-    dispatch(fetchRequirements());
-  }, [dispatch, user]);
+    if (user?.id && user?.role) {
+      dispatch(fetchCandidates());
+      dispatch(fetchRequirements());
+    }
+  }, [dispatch, user?.id, user?.role]);
 
   // -------------------------------
   // FORM HANDLERS (unchanged)

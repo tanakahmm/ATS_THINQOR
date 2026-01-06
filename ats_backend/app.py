@@ -65,9 +65,16 @@ def initialize_database():
                 role ENUM('ADMIN','DELIVERY_MANAGER','TEAM_LEAD','RECRUITER','CLIENT','CANDIDATE') DEFAULT 'RECRUITER',
                 phone VARCHAR(20),
                 status VARCHAR(20) DEFAULT 'ACTIVE',
+                session_token VARCHAR(255),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+
+        # Add session_token column if not exists
+        cursor.execute("SHOW COLUMNS FROM users LIKE 'session_token'")
+        if not cursor.fetchone():
+            print("⚠️ Adding 'session_token' column to users...")
+            cursor.execute("ALTER TABLE users ADD COLUMN session_token VARCHAR(255)")
 
         # ---------------------------
         # USERSDATA TABLE
@@ -1003,7 +1010,7 @@ def login():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Search in 'users' table (registered users)
+        # Search in 'users' table
         cursor.execute("""
             SELECT 
                 u.id, 
@@ -1020,15 +1027,77 @@ def login():
         """, (email, hashed_pw))
         user = cursor.fetchone()
 
-        cursor.close()
-        conn.close()
         if user:
+            # Generate Session Token
+            token = str(uuid.uuid4())
+            
+            # Store token in DB
+            cursor.execute("UPDATE users SET session_token = %s WHERE id = %s", (token, user['id']))
+            conn.commit()
+            
+            # Attach token to response user object
+            user['token'] = token
+            
+            cursor.close()
+            conn.close()
             return jsonify({"message": "✅ Login successful", "user": user}), 200
         else:
+            cursor.close()
+            conn.close()
             return jsonify({"message": "❌ Invalid email or password"}), 401
 
     except Exception as e:
         return jsonify({"message": "❌ Error during login", "error": str(e)}), 500
+
+
+@app.route('/verify-session', methods=['POST'])
+def verify_session():
+    try:
+        data = request.get_json()
+        token = data.get('token')
+        
+        if not token:
+            return jsonify({"valid": False, "message": "No token provided"}), 401
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT id, name, email, role, status 
+            FROM users 
+            WHERE session_token = %s AND status = 'ACTIVE'
+        """, (token,))
+        user = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if user:
+            return jsonify({"valid": True, "user": user}), 200
+        else:
+            return jsonify({"valid": False, "message": "Invalid or expired session"}), 401
+            
+    except Exception as e:
+        return jsonify({"valid": False, "error": str(e)}), 500
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    try:
+        data = request.get_json()
+        token = data.get('token')
+        
+        if token:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET session_token = NULL WHERE session_token = %s", (token,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+        return jsonify({"message": "Logged out successfully"}), 200
+    except Exception as e:
+        return jsonify({"message": "Error logging out", "error": str(e)}), 500
 
 
 @app.route('/signup', methods=['POST'])
@@ -2004,32 +2073,60 @@ def update_client(id):
 
 
 # ---------------- DELETE CLIENT ----------------
-@app.route('/delete-client/<int:id>', methods=['DELETE'])
+# ---------------- DELETE CLIENT ----------------
+@app.route('/delete-client/<int:id>', methods=['DELETE', 'OPTIONS'])
 def delete_client(id):
+    if request.method == "OPTIONS":
+        return '', 200
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        # 1️⃣ Check if this client is linked to any requirements
-        cursor.execute("SELECT COUNT(*) FROM requirements WHERE client_id = %s", (id,))
-        req_count = cursor.fetchone()[0]
+        # 1. Fetch all requirements for this client
+        cursor.execute("SELECT id FROM requirements WHERE client_id = %s", (id,))
+        reqs = cursor.fetchall()
+        req_ids = [r[0] for r in reqs]
 
-        if req_count > 0:
-            return jsonify({
-                "message": "Client cannot be deleted because it is used in one or more requirements."
-            }), 400
+        if req_ids:
+            # 2. Cascade delete linked data for these requirements
+            # We can use IN clause for efficiency
+            format_strings = ','.join(['%s'] * len(req_ids))
+            
+            # Delete from candidate_progress
+            cursor.execute(f"DELETE FROM candidate_progress WHERE requirement_id IN ({format_strings})", tuple(req_ids))
+            
+            # Delete from candidate_screening
+            cursor.execute(f"DELETE FROM candidate_screening WHERE requirement_id IN ({format_strings})", tuple(req_ids))
+            
+            # Delete from assesment_queue
+            cursor.execute(f"DELETE FROM assesment_queue WHERE requirement_id IN ({format_strings})", tuple(req_ids))
+            
+            # Delete from interviews
+            cursor.execute(f"DELETE FROM interviews WHERE requirement_id IN ({format_strings})", tuple(req_ids))
+            
+            # Delete from requirement_stages
+            cursor.execute(f"DELETE FROM requirement_stages WHERE requirement_id IN ({format_strings})", tuple(req_ids))
+            
+            # Delete from requirement_allocations
+            cursor.execute(f"DELETE FROM requirement_allocations WHERE requirement_id IN ({format_strings})", tuple(req_ids))
 
-        # 2️⃣ Safe to delete client
+            # Delete the requirements themselves
+            cursor.execute(f"DELETE FROM requirements WHERE id IN ({format_strings})", tuple(req_ids))
+
+        # 3. Finally delete the client
         cursor.execute("DELETE FROM clients WHERE id = %s", (id,))
         conn.commit()
 
         return jsonify({
             "id": id,
-            "message": "Client deleted successfully!"
+            "message": "Client and all associated requirements deleted successfully!"
         }), 200
 
-    except Error as e:
-        return jsonify({"message": str(e)}), 500
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Error deleting client: {e}")
+        return jsonify({"message": "Error deleting client", "error": str(e)}), 500
 
     finally:
         cursor.close()
@@ -2046,7 +2143,15 @@ def get_users_list():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT id, name, email, phone, role, status FROM users ORDER BY id DESC")
+        
+        # EXCLUDE Srini Admin (srini@thinqorsolutions.com) from list
+        # We can filter by email or specific ID if known, email is safer/readable
+        cursor.execute("""
+            SELECT id, name, email, phone, role, status 
+            FROM users 
+            WHERE email != 'srini@thinqorsolutions.com'
+            ORDER BY id DESC
+        """)
         users = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -2109,9 +2214,19 @@ def add_user():
 # -------------------------------
 # Update a user
 # -------------------------------
+# -------------------------------
+# Update a user
+# -------------------------------
 @app.route("/update-user/<int:id>", methods=["PUT"])
 def update_user(id):
     try:
+        # Securely identify requester
+        requester = get_current_user()
+        if not requester:
+            return jsonify({"message": "❌ Unauthorized: Please login"}), 401
+            
+        requester_email = requester.get("email", "").lower()
+
         data = request.json
         password = data.get("password")  # optional
 
@@ -2142,6 +2257,23 @@ def update_user(id):
             conn.close()
             return jsonify({"message": "Name and email are required"}), 400
 
+        # ---------------- RBAC SECURITY CHECK ----------------
+        target_email = existing.get("email", "").lower()
+        target_role = existing.get("role")
+        
+        # Rule 1: NO ONE can edit Srini Admin via this generic route
+        if target_email == "srini@thinqorsolutions.com":
+             cursor.close()
+             conn.close()
+             return jsonify({"message": "⛔ Security Violation: Cannot modify Main Admin account."}), 403
+
+        # Rule 2: If target is ADMIN, only Srini can edit.
+        if target_role == "ADMIN":
+             if requester_email != "srini@thinqorsolutions.com":
+                 cursor.close()
+                 conn.close()
+                 return jsonify({"message": "⛔ Permission Denied: Only Main Admin can edit other Admins."}), 403
+ 
         update_values = [name, email, phone, role, status, id]
 
         if password:
@@ -2172,8 +2304,69 @@ def update_user(id):
 @app.route("/delete-user/<int:id>", methods=["DELETE"])
 def delete_user(id):
     try:
+        # Securely identify requester
+        requester = get_current_user()
+        if not requester:
+            return jsonify({"message": "❌ Unauthorized: Please login"}), 401
+            
+        requester_email = requester.get("email", "").lower()
+
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("SELECT email, role FROM users WHERE id=%s", (id,))
+        target_user = cursor.fetchone()
+        
+        if not target_user:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "User not found"}), 404
+            
+        target_email = target_user['email'].lower()
+        target_role = target_user['role']
+        
+        # Rule 1: Cannot delete Srini
+        if target_email == "srini@thinqorsolutions.com":
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "⛔ Security Violation: Cannot delete Main Admin."}), 403
+            
+        # Rule 2: If target is ADMIN, only Srini can delete
+        if target_role == "ADMIN":
+            if requester_email != "srini@thinqorsolutions.com":
+                cursor.close()
+                conn.close()
+                return jsonify({"message": "⛔ Permission Denied: Only Main Admin can delete other Admins."}), 403
+                
+        # Proceed with delete
+        
+        # 3. Handle FK Constraints: Reassign ownership to the Admin deleting the user
+        print(f"DEBUG: requester={requester}")
+        
+        try:
+            requester_id = int(requester.get("id"))
+        except (ValueError, TypeError):
+            # Fallback if ID is invalid (should not happen with token auth)
+            print(f"❌ Error: Invalid requester ID: {requester.get('id')}")
+            # Try to look up ID by email
+            conn = get_db_connection()
+            c2 = conn.cursor()
+            c2.execute("SELECT id FROM users WHERE email=%s", (requester_email,))
+            row = c2.fetchone()
+            c2.close()
+            conn.close()
+            if row:
+                requester_id = row[0]
+            else:
+                 return jsonify({"message": "❌ Error: Could not verify requester ID for reassignment."}), 500
+
+        # Reassign candidates created by this user
+        cursor.execute("UPDATE candidates SET created_by = %s WHERE created_by = %s", (requester_id, id))
+        
+        # Reassign requirements created by this user
+        cursor.execute("UPDATE requirements SET created_by = %s WHERE created_by = %s", (requester_id, id))
+        
+        # Delete user
         cursor.execute("DELETE FROM users WHERE id=%s", (id,))
         conn.commit()
         cursor.close()

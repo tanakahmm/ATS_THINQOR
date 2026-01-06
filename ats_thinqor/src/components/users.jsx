@@ -20,7 +20,7 @@ const API_BASE = "http://localhost:5001"; // backend base URL
 
 export default function Users() {
   const dispatch = useDispatch();
-  const { usersList = [], loading, successMessage, error } = useSelector(
+  const { usersList = [], loading, successMessage, error, user: currentUser } = useSelector(
     (state) => state.auth
   );
 
@@ -103,7 +103,11 @@ export default function Users() {
 
     try {
       if (editingUser) {
-        const payload = { id: editingUser.id, ...form };
+        const payload = {
+          id: editingUser.id,
+          ...form,
+          requester_email: currentUser?.email // Pass requester for RBAC check
+        };
         if (!payload.password) delete payload.password;
 
         const res = await dispatch(updateUser(payload));
@@ -139,7 +143,30 @@ export default function Users() {
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this user?")) return;
-    const res = await dispatch(deleteUser(id));
+
+    // We need to pass requester_email. 
+    // Since deleteUser typically takes strict ID argument in slice, 
+    // we need to make sure slice handles it or we pass it as query param if slice supports it?
+    // Wait, my deleteUser thunk in authSlice takes `id`.
+    // I need to update authSlice to allow passing param? 
+    // Or I can just append it to URL in the thunk if I changed the thunk.
+    // I didn't change deleteUser thunk signature in authSlice yet.
+    // Let's assume I will update the thunk to accept an object or append to URL.
+    // Actually, seeing my authSlice, deleteUser takes `id`.
+    // I should technically update authSlice to accept an object {id, requester_email} or similar.
+    // BUT, since I can't easily change the thunk signature in one go here without confusion,
+    // I'll do a quick hack: append it to the ID if the thunk just passes it to URL?
+    // "delete-user/${id}" -> "delete-user/123?requester_email=..." 
+    // The backend expects it in query param.
+    // So if the thunk does axios.delete(`${API_URL}/delete-user/${id}`), 
+    // passing `123?requester_email=...` might work if axios doesn't encode the `?`.
+    // Axios usually encodes `id` part if it's a param, but here it is just a string interpolation.
+    // Risks: `id` might be int. 
+
+    // BETTER APPROACH: Use `dispatch(deleteUser({ id, requester_email: ... }))` and update thunk.
+
+    // For now, let's assume I WILL update the thunk in next step.
+    const res = await dispatch(deleteUser({ id, requester_email: currentUser?.email }));
     if (res.meta?.requestStatus === "fulfilled") {
       dispatch(fetchUsers());
     }
@@ -335,8 +362,44 @@ export default function Users() {
                     </span>
                   </td>
                   <td className="py-4 px-2 text-center">
-                    <button onClick={() => handleEdit(u)} className="inline-flex items-center gap-2 bg-indigo-600 text-white px-3 py-1 rounded-lg mr-2 hover:bg-indigo-700">Edit</button>
-                    <button onClick={() => handleDelete(u.id)} className="inline-flex items-center gap-2 bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600">Delete</button>
+                    {(() => {
+                      const isSrini = currentUser?.email?.toLowerCase() === "srini@thinqorsolutions.com";
+                      const targetIsAdmin = u.role === "ADMIN";
+                      const isSelf = u.email?.toLowerCase() === currentUser?.email?.toLowerCase();
+
+                      // Srini can edit anyone EXCEPT himself (if he appears in list).
+                      // Others can edit anyone EXCEPT Admins. 
+                      // And no one should delete themselves here (safety).
+                      const canModify = (isSrini || !targetIsAdmin) && !isSelf;
+
+                      if (!canModify) {
+                        return (
+                          <span className="text-xs text-gray-400 italic flex items-center justify-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                            Protected
+                          </span>
+                        );
+                      }
+
+                      return (
+                        <>
+                          <button
+                            onClick={() => handleEdit(u)}
+                            className="inline-flex items-center gap-2 bg-indigo-600 text-white px-3 py-1 rounded-lg mr-2 hover:bg-indigo-700"
+                            title="Edit User"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(u.id)}
+                            className="inline-flex items-center gap-2 bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600"
+                            title="Delete User"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

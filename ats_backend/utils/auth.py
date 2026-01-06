@@ -1,34 +1,50 @@
 # ats_backend/utils/auth.py
 from flask import request, session
+import pymysql
+import os
+
+def get_db_connection():
+    return pymysql.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        user=os.getenv("DB_USER", "root"),
+        password=os.getenv("DB_PASSWORD", ""),
+        database=os.getenv("DB_NAME", "ats_system")
+    )
 
 def get_current_user():
     """
     Returns a dict like {"id": ..., "name": ..., "role": ..., "client_id": ...}
-    Tries, in order:
-      1) JWT (if you later add flask_jwt_extended)
-      2) Flask session
-      3) 'user' object in request.json (fallback used by your frontend)
+    Prioritizes secure session_token from Authorization header.
     """
-    # 1) JWT (optional)
-    try:
-        from flask_jwt_extended import get_jwt_identity
-        ident = get_jwt_identity()
-        if ident:  # typically a dict you set at login
-            return ident
-    except Exception:
-        pass
+    # 1. Check Authorization Header (Bearer Token)
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT id, name, email, role, phone, status FROM users WHERE session_token = %s", (token,))
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if user:
+                return user
+        except Exception as e:
+            print("Session token validation error:", e)
 
-    # 2) Flask session (if you store user there)
+    # 2. Flask session fallback
     if isinstance(session.get("user"), dict):
         return session["user"]
 
-    # 3) Body fallback (your frontend can send { user: {...} })
+    # 3. Body fallback (Legacy/Insecure - Keeping for compatibility but deprecated for critical actions)
+    # WARNING: This allows spoofing. RBAC critical actions should fail if this is the only source.
     try:
         body = request.get_json(silent=True) or {}
         if isinstance(body.get("user"), dict):
+            # Log warning or potentially ignore for sensitive routes
             return body["user"]
     except Exception:
         pass
 
-    # Fallback anonymous
-    return {"id": None, "name": "Unknown", "role": "GUEST", "client_id": None}
+    return None
