@@ -22,7 +22,8 @@ import CandidateTracking from "./components/CandidateTracking";
 import Reports from "./components/Reports";
 import Settings from "./components/Settings";
 import TlDashboard from "./components/TLDashboard";
-
+import Avatar3D from "./components/Avatar3D";
+import ChatPage from "./components/chatpage";
 export default function App() {
   const dispatch = useDispatch();
 
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="/candidate-tracking" element={<CandidateList />} />
           <Route path="/candidate-tracking/:candidateId/:requirementId" element={<CandidateTracking />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/chat" element={<ChatPage />} />
           <Route path="/offers" element={<div className="p-10 text-center text-gray-500">Offers Page Coming Soon</div>} />
         </Route>
       </Routes>

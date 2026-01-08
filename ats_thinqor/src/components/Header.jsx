@@ -46,6 +46,7 @@ export default function Header() {
       { key: "candidates", to: "/candidates", label: "Candidates" },
       { key: "interviews", to: "/interviews", label: "Interviews" },
       { key: "offers", to: "/offers", label: "Offers" },
+      { key: "chat", to: "/chat", label: "Chat" },
       { key: "reports", to: "/reports", label: "Reports" },
       { key: "settings", to: "/settings", label: "Settings" },
       { key: "create-requirement", to: "/create-requirement", label: "Create Requirement" },

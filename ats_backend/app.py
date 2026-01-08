@@ -343,6 +343,20 @@ def initialize_database():
             );
         """)
 
+        # ---------------- INTERACTION LOGS (AVATAR) ----------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS interaction_logs (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                session_id VARCHAR(64),
+                user_id INT,
+                user_role VARCHAR(50),
+                message_in TEXT,
+                message_out TEXT,
+                emotion VARCHAR(32),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         conn.commit()
         cursor.close()
         conn.close()
@@ -2492,6 +2506,8 @@ def get_candidate_progress():
 @app.route('/uploads/resumes/<filename>')
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
 
 # -------------------------------------
 # Run Server

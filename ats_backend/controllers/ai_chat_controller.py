@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from utils.llm_client import call_llm
 from services.ai_data_service import (
@@ -30,25 +30,33 @@ from services.ai_data_service import (
 ai_bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
 
-SYSTEM_PROMPT = (
-	"You are an ATS assistant. Answer ONLY from the CONTEXT provided. "
+DATA_CONTEXT_PROMPT = (
 	"The ATS database includes these tables and columns:\n"
-	"- candidates: id, name, email, phone, skills, education, experience, ctc, ectc, resume_filename, created_by, created_at\n"
+	"- candidates: id, name, email, phone, skills, education, experience, ctc, ectc, resume_filename, created_by, created_at, source\n"
 	"- requirements: id, client_id, title, description, location, skills_required, experience_required, ctc_range, no_of_rounds, status, created_at, created_by\n"
-	"- requirement_stages: id, requirement_id, stage_order, stage_name, is_mandatory (tracks custom stage names like 'Technical Round', 'HR Round' for each requirement)\n"
-	"- candidate_progress: id, candidate_id, requirement_id, stage_id, stage_name, status (PENDING/IN_PROGRESS/COMPLETED/REJECTED), decision (NONE/MOVE_NEXT/HOLD/REJECT), updated_at (tracks which stage each candidate is at)\n"
-	"- candidate_screening: id, candidate_id, requirement_id, ai_score, ai_rationale, recommend, red_flags, status, created_at (AI screening results)\n"
-	"- requirement_allocations: id, requirement_id, recruiter_id, assigned_by, status, created_at\n"
+	"- requirement_stages: id, requirement_id, stage_order, stage_name, is_mandatory (tracks custom stage names like 'Technical Round', 'HR Round')\n"
+	"- candidate_progress: id, candidate_id, requirement_id, stage_id, stage_name, status (PENDING/IN_PROGRESS/COMPLETED/REJECTED), decision, manual_decision, updated_at (tracks stage progress)\n"
+	"- candidate_screening: id, candidate_id, requirement_id, ai_score, ai_rationale, recommend, red_flags, model_version, status, created_at\n"
+	"- requirement_allocations: id, requirement_id, recruiter_id, assigned_by, status, created_at (tracks which recruiter is working on which req)\n"
+	"- interviews: id, candidate_id, requirement_id, category, stage, date, time, duration, mode, location, interviewer, notes, status (SCHEDULED/COMPLETED), created_at\n"
 	"- clients: id, name, contact_person, email, phone, address, status, created_at\n"
-	"- users: id, name, email, phone, role, status, created_at\n"
+	"- users: id, name, email, password_hash, role, phone, status, session_token, created_at\n"
 	"- usersdata: id, name, email, phone, role, status, created_at\n"
-	"If the context contains self_profile, self_assignments, self_candidates, or self_org_stats, use them to answer "
-	"questions about the logged-in user directly (e.g., 'what are my assignments?', 'what's my phone number?'). "
-	"Role rules: admin and delivery manager can access everything including candidates and allocations; "
-	"recruiters only see requirements allocated to them; clients only see requirements where client_id matches their id. "
-	"For tracking questions (e.g., 'how many candidates in last round?', 'who qualified?'), use candidate_progress to check stage status. "
-	"A candidate is 'qualified' or 'passed' a stage if status=COMPLETED. They are in 'last round' if stage_order equals no_of_rounds. "
-	"Never invent data. If a record or access is missing, say so directly and offer available related information."
+	"- interaction_logs: id, session_id, user_id, user_role, message_in, message_out, emotion, created_at (history of avatar chats)\n\n"
+	"If the context contains self_profile, self_assignments, use them to answer questions about the logged-in user.\n"
+	"Role rules: ADMIN and DELIVERY_MANAGER can see everything. RECRUITERS see only their allocated requirements, candidates they added, and interviews relevant to them. CLIENTS see only their own data.\n"
+	"Never invent data. If a record is missing, say so directly dont give all colums or tables name just say missing or cannot find it or you wont have access if that particular role doesnt have access to it or you dont have access to it."
+)
+
+DEFAULT_SYSTEM_PROMPT = (
+	"You are an ATS assistant. Answer ONLY from the CONTEXT provided. " + DATA_CONTEXT_PROMPT
+)
+
+AVATAR_SYSTEM_PROMPT = (
+	"You are Luffy, a calm professional recruiting assistant. Answer ONLY from the CONTEXT provided. "
+	"Start your response with an emotion tag strictly from this list: [NEUTRAL], [HAPPY], [THINKING], [CONCERNED], [EXCITED], [SAD]. "
+	"Example: '[HAPPY] I found three candidates for you.' "
+	+ DATA_CONTEXT_PROMPT
 )
 
 
@@ -59,30 +67,27 @@ def _detect_intent(message: str) -> str:
 		return "requirement"
 	if "client" in ml or "clients" in ml:
 		return "client"
+	if any(k in ml for k in ["interview", "schedule", "meeting"]):
+		return "interview"
+	if any(k in ml for k in ["screening", "ai score", "rationale"]):
+		return "screening"
 	if any(k in ml for k in ["candidate", "candidates", "applicant", "applicants"]):
 		return "candidates"
 	if any(k in ml for k in ["recruiter", "recruiters", "users", "user list", "team"]):
 		return "users"
-	if any(k in ml for k in ["my allocations", "my requirements", "allocated", "assigned to me", "recruiter"]):
+	if any(k in ml for k in ["my allocations", "my requirements", "allocated", "assigned to me"]):
 		return "allocations"
+	if any(k in ml for k in ["log", "history", "chat history", "analytics"]):
+		return "logs"
 	return "general"
 
 
-@ai_bp.route("/chat", methods=["POST"])
-def chat() -> Any:
-
-	# 1) Read user and message. We expect frontend to include logged-in user payload
-	#    since this project does not attach req.user automatically.
-	data = request.get_json() or {}
-	message = (data.get("message") or "").strip()
-	user = data.get("user") or {}
-
-	if not user or not user.get("role"):
-		return jsonify({"answer": "Unauthorized: missing user/role.", "context": None}), 401
-	if not message:
-		return jsonify({"answer": "Please provide a message.", "context": None}), 400
-
-	# 2) Simple routing/intent
+def _process_chat_request(user: Dict[str, Any], message: str, system_prompt: str) -> Dict[str, Any]:
+	"""
+	Core logic to gather context and call LLM.
+	Returns a dict with 'answer' and 'context'.
+	"""
+	# 1) Simple routing/intent
 	intent = _detect_intent(message)
 
 	context: Dict[str, Any] = {"user": {"id": user.get("id"), "role": user.get("role"), "client_id": user.get("client_id")}, "query": message}
@@ -91,7 +96,7 @@ def chat() -> Any:
 		context.update(self_context)
 
 	try:
-		# 3) Fetch ATS data with role-based filtering
+		# 2) Fetch ATS data with role-based filtering
 		if intent == "requirement":
 			# try to extract a requirement id pattern like R-123
 			req_id = None
@@ -182,6 +187,22 @@ def chat() -> Any:
 						context["candidate"] = candidate
 						break
 
+
+		elif intent == "interview":
+			from services.ai_data_service import get_interviews_for_user
+			context["interviews"] = get_interviews_for_user(user)
+
+		elif intent == "screening":
+			from services.ai_data_service import get_candidate_screening_for_user
+			context["screenings"] = get_candidate_screening_for_user(user)
+
+		elif intent == "logs":
+			from services.ai_data_service import get_interaction_logs_for_admin
+			if user.get("role", "").upper() == "ADMIN":
+				context["logs"] = get_interaction_logs_for_admin()
+			else:
+				context["logs"] = "Access Denied. Only Admin can view logs."
+
 		elif intent == "users":
 			# If admin wants users/recruiters, include list; else scope appropriately
 			role = (user.get("role") or "").upper()
@@ -201,18 +222,80 @@ def chat() -> Any:
 			context["candidates"] = context.get("candidates") or list_candidates_for_user(user)
 			context["allocations"] = context.get("allocations") or list_requirement_allocations()
 
-		# 4) Call LLM with system prompt, original question, and structured context
-		answer = call_llm(SYSTEM_PROMPT, context, message)
-		return jsonify({"answer": answer, "context": context}), 200
+		# 3) Call LLM with system prompt, original question, and structured context
+		answer = call_llm(system_prompt, context, message)
+		return {"answer": answer, "context": context}
 
 	except Exception as e:
-		# Never crash; provide a safe message
-		return jsonify({"answer": f"AI processing failed: {e}", "context": context}), 200
+		return {"answer": f"AI processing failed: {e}", "context": context, "error": str(e)}
+
+
+@ai_bp.route("/chat", methods=["POST"])
+def chat() -> Any:
+	data = request.get_json() or {}
+	message = (data.get("message") or "").strip()
+	user = data.get("user") or {}
+
+	if not user or not user.get("role"):
+		return jsonify({"answer": "Unauthorized: missing user/role.", "context": None}), 401
+	if not message:
+		return jsonify({"answer": "Please provide a message.", "context": None}), 400
+
+	result = _process_chat_request(user, message, DEFAULT_SYSTEM_PROMPT)
+	return jsonify(result), 200
+
+
+@ai_bp.route("/avatar-chat", methods=["POST"])
+def avatar_chat() -> Any:
+	"""
+	Endpoint for the 3D Avatar (Luffy).
+	Returns specific JSON format: { "text": "...", "emotion": "HAPPY" }
+	"""
+	data = request.get_json() or {}
+	message = (data.get("message") or "").strip()
+	user = data.get("user") or {}
+	session_id = data.get("session_id")
+
+	if not user or not user.get("role"):
+		return jsonify({"text": "I need to know who you are first.", "emotion": "NEUTRAL"}), 401
+	if not message:
+		return jsonify({"text": "I'm listening...", "emotion": "NEUTRAL"}), 400
+
+	result = _process_chat_request(user, message, AVATAR_SYSTEM_PROMPT)
+	raw_answer = result.get("answer", "I'm having trouble connecting to my brain right now.")
+	
+	# Extract emotion tag
+	emotion = "NEUTRAL"
+	clean_text = raw_answer
+	
+	import re
+	match = re.search(r"^\s*\[(HAPPY|NEUTRAL|THINKING|CONCERNED|EXCITED|SAD)\]", raw_answer, re.IGNORECASE)
+	if match:
+		emotion = match.group(1).upper()
+		clean_text = re.sub(r"^\s*\[(HAPPY|NEUTRAL|THINKING|CONCERNED|EXCITED|SAD)\]", "", raw_answer, flags=re.IGNORECASE).strip()
+	
+	# TODO: Log interaction with session_id
+	try:
+		from utils.db import get_db_connection
+		conn = get_db_connection()
+		if conn:
+			cursor = conn.cursor()
+			cursor.execute("""
+				INSERT INTO interaction_logs (session_id, user_id, user_role, message_in, message_out, emotion)
+				VALUES (%s, %s, %s, %s, %s, %s)
+			""", (session_id, user.get("id"), user.get("role"), message, clean_text, emotion))
+			conn.commit()
+			cursor.close()
+			conn.close()
+	except Exception as e:
+		print(f"Failed to log interaction: {e}")
+	
+	return jsonify({
+		"text": clean_text,
+		"emotion": emotion
+	}), 200
 
 
 def register_ai_routes(app) -> None:
-
 	# Attach blueprint to the Flask app without changing existing routes
 	app.register_blueprint(ai_bp)
-
-
