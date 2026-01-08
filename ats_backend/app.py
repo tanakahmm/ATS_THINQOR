@@ -1073,6 +1073,7 @@ def verify_session():
         conn.close()
         
         if user:
+            user['token'] = token  # Ensure token is returned to persist in frontend
             return jsonify({"valid": True, "user": user}), 200
         else:
             return jsonify({"valid": False, "message": "Invalid or expired session"}), 401
@@ -1300,7 +1301,7 @@ def get_recruiters():
 @app.route("/requirements", methods=["POST"])
 def create_requirement():
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         req_id = str(uuid.uuid4())
 
         # Validate required fields
@@ -2364,7 +2365,8 @@ def delete_user(id):
         cursor.execute("UPDATE candidates SET created_by = %s WHERE created_by = %s", (requester_id, id))
         
         # Reassign requirements created by this user
-        cursor.execute("UPDATE requirements SET created_by = %s WHERE created_by = %s", (requester_id, id))
+        # Safe cast to string because created_by in requirements is VARCHAR
+        cursor.execute("UPDATE requirements SET created_by = %s WHERE created_by = %s", (str(requester_id), str(id)))
         
         # Delete user
         cursor.execute("DELETE FROM users WHERE id=%s", (id,))

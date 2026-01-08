@@ -2,14 +2,8 @@
 from flask import request, session
 import pymysql
 import os
+from utils.db import get_db_connection
 
-def get_db_connection():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_NAME", "ats_system")
-    )
 
 def get_current_user():
     """
@@ -22,6 +16,8 @@ def get_current_user():
         token = auth_header.split(" ")[1]
         try:
             conn = get_db_connection()
+            if not conn:
+                return None
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("SELECT id, name, email, role, phone, status FROM users WHERE session_token = %s", (token,))
             user = cursor.fetchone()

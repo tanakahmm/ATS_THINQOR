@@ -8,39 +8,9 @@ from pathlib import Path
 import pymysql
 import pymysql.cursors
 
-# Load environment variables (same as app.py)
-try:
-    from dotenv import load_dotenv
-    env_file = Path(__file__).parent.parent / ".env"
-    if not env_file.exists():
-        env_file = Path(__file__).parent.parent / "config.env"
-    if env_file.exists():
-        load_dotenv(dotenv_path=env_file, override=True)
-except ImportError:
-    pass  # dotenv not available, use system env vars
+from utils.db import get_db_connection
 
-
-def get_db_connection():
-    """
-    Returns a NEW PyMySQL connection (DictCursor ready).
-    Mirrors previous behavior (open per call, close per call).
-    """
-    try:
-        connection = pymysql.connect(
-            host=os.getenv("DB_HOST", "localhost"),
-            user=os.getenv("DB_USER", "root"),
-            password=os.getenv("DB_PASSWORD", ""),
-            database=os.getenv("DB_NAME", "ats_system"),
-            cursorclass=pymysql.cursors.DictCursor,
-            autocommit=False,
-            connect_timeout=10,
-            read_timeout=30,
-            write_timeout=30,
-        )
-        return connection
-    except Exception as e:
-        print("❌ AI service DB connection failed:", e)
-        return None
+# Removed local get_db_connection to use shared logic from utils.db
 
 
 UserDict = Dict[str, Any]
