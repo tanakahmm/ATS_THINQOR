@@ -77,6 +77,8 @@ export default function CreateRequirements() {
     );
   }
 
+  // ... imports
+
   // ---------------- FORM HANDLERS ----------------
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -84,9 +86,14 @@ export default function CreateRequirements() {
 
     // Update stage names array when no_of_rounds changes
     if (name === "no_of_rounds") {
-      const rounds = parseInt(value) || 1;
+      let rounds = parseInt(value);
+      if (isNaN(rounds) || rounds < 1) rounds = 1;
+      if (rounds > 10) rounds = 10; // Cap at 10
+
+      // Adjust stageNames array size while creating new array to avoid mutation issues
       const newStageNames = [];
       for (let i = 0; i < rounds; i++) {
+        // Preserve existing names if available, else default
         newStageNames.push(stageNames[i] || `Round ${i + 1}`);
       }
       setStageNames(newStageNames);
@@ -101,6 +108,12 @@ export default function CreateRequirements() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    // Extra validation for mandatory fields just in case
+    if (!form.skills_required || !form.experience_required || !form.ctc_range) {
+      alert("Please fill all mandatory fields: Skills, Experience, CTC.");
+      return;
+    }
 
     // Include stage names in payload
     const payload = {
@@ -188,8 +201,14 @@ export default function CreateRequirements() {
         <input name="location" placeholder="Location" className="border p-2 rounded"
           value={form.location} onChange={handleChange} required />
 
-        <input name="experience_required" placeholder="Experience (years)" className="border p-2 rounded"
-          value={form.experience_required} onChange={handleChange} />
+        <input
+          name="experience_required"
+          placeholder="Experience (years)"
+          className="border p-2 rounded"
+          value={form.experience_required}
+          onChange={handleChange}
+          required
+        />
 
         <textarea
           name="description"
@@ -200,9 +219,23 @@ export default function CreateRequirements() {
           required
         />
 
-        <input name="skills_required" placeholder="Skills (comma separated)" value={form.skills_required} onChange={handleChange} className="border p-2 rounded" />
+        <input
+          name="skills_required"
+          placeholder="Skills (comma separated)"
+          value={form.skills_required}
+          onChange={handleChange}
+          className="border p-2 rounded"
+          required
+        />
 
-        <input name="ctc_range" placeholder="CTC Range" value={form.ctc_range} onChange={handleChange} className="border p-2 rounded" />
+        <input
+          name="ctc_range"
+          placeholder="CTC Range"
+          value={form.ctc_range}
+          onChange={handleChange}
+          className="border p-2 rounded"
+          required
+        />
 
         <input
           name="no_of_rounds"
@@ -233,12 +266,14 @@ export default function CreateRequirements() {
                     onChange={(e) => handleStageNameChange(index, e.target.value)}
                     placeholder={`e.g., Technical Round, HR Round`}
                     className="flex-1 border p-2 rounded text-sm"
+                    maxLength={50}
+                    required
                   />
                 </div>
               ))}
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              💡 These stage names will be used for candidate tracking
+              💡 These stage names will be used for candidate tracking. Max 50 characters.
             </p>
           </div>
         )}

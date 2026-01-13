@@ -820,6 +820,28 @@ def create_user():
                 "message": f"Invalid role. Allowed roles: {', '.join(allowed_roles)}"
             }), 400
 
+        # --- VALIDATION: Email Format ---
+        email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        if not re.match(email_regex, email):
+            return jsonify({"message": "Invalid email address format"}), 400
+
+        # --- VALIDATION: Phone Number ---
+        # 10 to 15 digits, no alphabets
+        if not re.match(r'^\d{10,15}$', str(phone)):
+             return jsonify({"message": "Invalid phone number. Must be 10-15 digits only."}), 400
+
+        # --- VALIDATION: Name Format ---
+        # No special chars like %, &, etc. Allow alphabets, spaces, dots, hyphens.
+        if not re.match(r"^[a-zA-Z\s\.\-]+$", name):
+             return jsonify({"message": "Invalid name format. Only alphabets, spaces, dots and hyphens allowed."}), 400
+
+        # --- VALIDATION: Password Strength ---
+        # Min 8 chars, at least 1 letter, 1 number
+        if len(password) < 8:
+            return jsonify({"message": "Password must be at least 8 characters long"}), 400
+        if not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+            return jsonify({"message": "Password must contain at least one letter and one number"}), 400
+
         # Hash the password
         password_hash = hashlib.sha256(password.encode()).hexdigest()
 
@@ -1319,7 +1341,7 @@ def create_requirement():
         req_id = str(uuid.uuid4())
 
         # Validate required fields
-        required_fields = ["client_id", "title", "location", "description"]
+        required_fields = ["client_id", "title", "location", "description", "skills_required", "experience_required", "ctc_range"]
         missing = []
         for field in required_fields:
             value = data.get(field)

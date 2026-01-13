@@ -190,15 +190,31 @@ export default function Requirements() {
                   </td>
                   <td className="p-3">{req.location}</td>
                   <td className="p-3">{req.experience_required} yrs</td>
-                  <td className="p-3 flex gap-1 flex-wrap">
-                    {(req.skills_required || "").split(",").map((skill, i) => (
-                      <span
-                        key={i}
-                        className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs"
-                      >
-                        {skill.trim()}
-                      </span>
-                    ))}
+                  <td className="p-3">
+                    <div className="flex gap-1 flex-wrap w-64">
+                      {(() => {
+                        const skills = (req.skills_required || "").split(",").map(s => s.trim()).filter(Boolean);
+                        const displayed = skills.slice(0, 3);
+                        const remaining = skills.length - 3;
+                        return (
+                          <>
+                            {displayed.map((skill, i) => (
+                              <span
+                                key={i}
+                                className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs"
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                            {remaining > 0 && (
+                              <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded-full text-xs" title={skills.slice(3).join(", ")}>
+                                +{remaining}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="p-3">{req.ctc_range || "--"}</td>
                   <td className="p-3">

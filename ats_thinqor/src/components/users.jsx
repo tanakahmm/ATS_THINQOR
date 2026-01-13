@@ -29,6 +29,11 @@ export default function Users() {
   const [editingUser, setEditingUser] = useState(null);
   const [roles, setRoles] = useState([]);
 
+  // Filter state
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterRole, setFilterRole] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+
   // form state
   const [form, setForm] = useState({
     name: "",
@@ -71,13 +76,22 @@ export default function Users() {
 
   const filtered = safeUsers.filter((u) => {
     const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return (
+
+    // Search Filter
+    const matchesSearch = !q || (
       (u.name || "").toLowerCase().includes(q) ||
       (u.email || "").toLowerCase().includes(q) ||
       (u.role || "").toLowerCase().includes(q) ||
       (u.phone || "").toLowerCase().includes(q)
     );
+
+    // Role Filter
+    const matchesRole = !filterRole || u.role === filterRole;
+
+    // Status Filter
+    const matchesStatus = !filterStatus || (u.status || "ACTIVE") === filterStatus;
+
+    return matchesSearch && matchesRole && matchesStatus;
   });
 
   const resetForm = () =>
@@ -97,8 +111,35 @@ export default function Users() {
       return alert("Please fill all required fields: name, email, phone, role.");
     }
 
+    // --- Validation Logic ---
+    const emailRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
+    const phoneRegex = /^\d{10,15}$/;
+    const nameRegex = /^[a-zA-Z\s\.\-]+$/;
+
+    if (!nameRegex.test(form.name)) {
+      return alert("Invalid name format. Only alphabets, spaces, dots and hyphens allowed.");
+    }
+    if (!emailRegex.test(form.email)) {
+      return alert("Invalid email format.");
+    }
+    if (!phoneRegex.test(form.phone)) {
+      return alert("Invalid phone number. Must be 10-15 digits only.");
+    }
+
+    // Password validation: Required if new user OR if editing and password field is not empty
+    const isPasswordProvided = !!form.password;
+
     if (!editingUser && !form.password) {
       return alert("Password is required when creating a new user.");
+    }
+
+    if (isPasswordProvided) {
+      if (form.password.length < 8) {
+        return alert("Password must be at least 8 characters long.");
+      }
+      if (!/[A-Za-z]/.test(form.password) || !/\d/.test(form.password)) {
+        return alert("Password must contain at least one letter and one number.");
+      }
     }
 
     try {
@@ -143,29 +184,6 @@ export default function Users() {
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this user?")) return;
-
-    // We need to pass requester_email. 
-    // Since deleteUser typically takes strict ID argument in slice, 
-    // we need to make sure slice handles it or we pass it as query param if slice supports it?
-    // Wait, my deleteUser thunk in authSlice takes `id`.
-    // I need to update authSlice to allow passing param? 
-    // Or I can just append it to URL in the thunk if I changed the thunk.
-    // I didn't change deleteUser thunk signature in authSlice yet.
-    // Let's assume I will update the thunk to accept an object or append to URL.
-    // Actually, seeing my authSlice, deleteUser takes `id`.
-    // I should technically update authSlice to accept an object {id, requester_email} or similar.
-    // BUT, since I can't easily change the thunk signature in one go here without confusion,
-    // I'll do a quick hack: append it to the ID if the thunk just passes it to URL?
-    // "delete-user/${id}" -> "delete-user/123?requester_email=..." 
-    // The backend expects it in query param.
-    // So if the thunk does axios.delete(`${API_URL}/delete-user/${id}`), 
-    // passing `123?requester_email=...` might work if axios doesn't encode the `?`.
-    // Axios usually encodes `id` part if it's a param, but here it is just a string interpolation.
-    // Risks: `id` might be int. 
-
-    // BETTER APPROACH: Use `dispatch(deleteUser({ id, requester_email: ... }))` and update thunk.
-
-    // For now, let's assume I WILL update the thunk in next step.
     const res = await dispatch(deleteUser({ id, requester_email: currentUser?.email }));
     if (res.meta?.requestStatus === "fulfilled") {
       dispatch(fetchUsers());
@@ -311,10 +329,61 @@ export default function Users() {
       </div>
 
       {/* Search + Filters */}
-      <div className="bg-white rounded-2xl shadow-sm p-4 mb-6 flex items-center gap-4">
-        <input type="text" placeholder="Search users..." className="flex-1 border rounded-lg px-4 py-3 focus:ring-0 focus:border-indigo-300"
-          value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="flex items-center gap-2 border px-4 py-2 rounded-lg">Filters</button>
+      <div className="bg-white rounded-2xl shadow-sm p-4 mb-6">
+        <div className="flex items-center gap-4">
+          <input type="text" placeholder="Search users by name, email, role..." className="flex-1 border rounded-lg px-4 py-3 focus:ring-0 focus:border-indigo-300"
+            value={search} onChange={(e) => setSearch(e.target.value)} />
+          <button
+            className={`flex items-center gap-2 border px-4 py-2 rounded-lg ${showFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'hover:bg-gray-50'}`}
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            Filters
+          </button>
+        </div>
+
+        {/* Expanded Filters */}
+        {showFilters && (
+          <div className="mt-4 pt-4 border-t flex flex-wrap gap-4 animate-fadeIn">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Filter by Role</label>
+              <select
+                className="border rounded-lg px-3 py-2 text-sm focus:ring-0 focus:border-indigo-300 min-w-[200px]"
+                value={filterRole}
+                onChange={(e) => setFilterRole(e.target.value)}
+              >
+                <option value="">All Roles</option>
+                {roles.map((r) => (
+                  <option key={r} value={r}>{r.replace("_", " ")}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Filter by Status</label>
+              <select
+                className="border rounded-lg px-3 py-2 text-sm focus:ring-0 focus:border-indigo-300 min-w-[200px]"
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+              >
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+            </div>
+
+            <div className="flex items-end">
+              <button
+                onClick={() => { setFilterRole(""); setFilterStatus(""); }}
+                className="text-sm text-red-600 hover:text-red-700 font-medium px-2 py-2"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Users List */}
@@ -322,7 +391,7 @@ export default function Users() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-lg font-semibold">Users List</h3>
-            <p className="text-sm text-gray-500">{safeUsers.length} users found</p>
+            <p className="text-sm text-gray-500">{filtered.length} users found</p>
           </div>
         </div>
 
@@ -375,7 +444,7 @@ export default function Users() {
                       if (!canModify) {
                         return (
                           <span className="text-xs text-gray-400 italic flex items-center justify-center gap-1">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v1m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                             Protected
                           </span>
                         );
