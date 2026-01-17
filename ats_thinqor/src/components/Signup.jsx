@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { signupUser, clearMessages } from "../auth/authSlice";
 import { useNavigate } from "react-router-dom";
+import { toPascalCase } from "../utils/stringUtils";
 
 export default function Signup() {
   const dispatch = useDispatch();
@@ -23,7 +24,11 @@ export default function Signup() {
   }, [successMessage, error, dispatch]);
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    let value = e.target.value;
+    if (e.target.name === "name") {
+      value = toPascalCase(value);
+    }
+    setForm({ ...form, [e.target.name]: value });
   };
 
   const handleSubmit = (e) => {

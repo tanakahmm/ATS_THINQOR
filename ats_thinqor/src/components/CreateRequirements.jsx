@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { createRequirement, fetchClients, autoFillRequirement } from "../auth/authSlice";
+import { toPascalCase } from "../utils/stringUtils";
 
 export default function CreateRequirements() {
   const dispatch = useDispatch();
@@ -82,7 +83,14 @@ export default function CreateRequirements() {
   // ---------------- FORM HANDLERS ----------------
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm({ ...form, [name]: value });
+
+    let finalValue = value;
+    // Auto-format title and location to PascalCase
+    if (["title", "location", "skills_required"].includes(name)) {
+      finalValue = toPascalCase(value);
+    }
+
+    setForm({ ...form, [name]: finalValue });
 
     // Update stage names array when no_of_rounds changes
     if (name === "no_of_rounds") {

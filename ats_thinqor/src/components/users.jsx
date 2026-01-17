@@ -9,6 +9,7 @@ import {
   clearMessages,
   fetchRoles
 } from "../auth/authSlice";
+import { toPascalCase } from "../utils/stringUtils";
 
 /**
  * Users Management - dynamic UI
@@ -274,7 +275,7 @@ export default function Users() {
           <div>
             <label className="block text-sm font-medium text-gray-700">Full Name</label>
             <input type="text" placeholder="John Doe" className="w-full border rounded-lg px-4 py-3 focus:ring-0 focus:border-indigo-300"
-              value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+              value={form.name} onChange={(e) => setForm({ ...form, name: toPascalCase(e.target.value) })} required />
           </div>
 
           <div>

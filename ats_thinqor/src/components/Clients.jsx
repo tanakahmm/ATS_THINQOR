@@ -7,6 +7,7 @@ import {
   deleteClient,
   clearMessages,
 } from "../auth/authSlice";
+import { toPascalCase } from "../utils/stringUtils";
 
 export default function Clients() {
   const dispatch = useDispatch();
@@ -127,34 +128,34 @@ export default function Clients() {
   return (
     <div className="max-w-6xl mx-auto p-6">
 
-{/* User Management Card */}
-<div className="bg-blue-100 rounded-2xl shadow-sm p-6 mb-6 flex items-center gap-4">
-  {/* Icon */}
-  <div className="w-12 h-12 flex items-center justify-center rounded-xl bg-blue-200 text-blue-700">
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      className="h-6 w-6"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      {/* Custom user + gear icon */}
-      <circle cx="12" cy="8" r="3" />
-      <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
-      <circle cx="18" cy="18" r="3" />
-      <path d="M18 15v1M18 21v1M15 18h1M21 18h1M16.5 16.5l.7.7M19.8 19.8l.7.7M16.5 19.5l.7-.7M19.8 16.2l.7-.7" />
-    </svg>
-  </div>
+      {/* User Management Card */}
+      <div className="bg-blue-100 rounded-2xl shadow-sm p-6 mb-6 flex items-center gap-4">
+        {/* Icon */}
+        <div className="w-12 h-12 flex items-center justify-center rounded-xl bg-blue-200 text-blue-700">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            {/* Custom user + gear icon */}
+            <circle cx="12" cy="8" r="3" />
+            <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+            <circle cx="18" cy="18" r="3" />
+            <path d="M18 15v1M18 21v1M15 18h1M21 18h1M16.5 16.5l.7.7M19.8 19.8l.7.7M16.5 19.5l.7-.7M19.8 16.2l.7-.7" />
+          </svg>
+        </div>
 
-  {/* Title + Subtitle */}
-  <div>
-    <h2 className="text-2xl font-bold text-gray-900">Client Management</h2>
-    <p className="text-gray-700 mt-1 text-sm">
-      Manage clients efficiently.
-    </p>
-  </div>
-</div>
+        {/* Title + Subtitle */}
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Client Management</h2>
+          <p className="text-gray-700 mt-1 text-sm">
+            Manage clients efficiently.
+          </p>
+        </div>
+      </div>
 
 
       {/* Messages */}
@@ -184,7 +185,7 @@ export default function Clients() {
               type="text"
               className="w-full border rounded-lg px-4 py-3"
               value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              onChange={(e) => setForm({ ...form, name: toPascalCase(e.target.value) })}
               required
             />
           </div>
@@ -242,8 +243,8 @@ export default function Clients() {
               {loading
                 ? "Saving..."
                 : editForm
-                ? "Update Client"
-                : "Add Client"}
+                  ? "Update Client"
+                  : "Add Client"}
             </button>
           </div>
         </form>

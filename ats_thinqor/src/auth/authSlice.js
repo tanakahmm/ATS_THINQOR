@@ -755,7 +755,15 @@ export const fetchUserDetails = createAsyncThunk(
 // INITIAL STATE
 // ------------------------------------------------------------------
 const initialState = {
-  user: JSON.parse(localStorage.getItem("user")) || null,
+  user: (() => {
+    try {
+      const u = localStorage.getItem("user");
+      return u && u !== "undefined" ? JSON.parse(u) : null;
+    } catch (e) {
+      console.error("Failed to parse user from localStorage:", e);
+      return null;
+    }
+  })(),
   isVerifying: true, // New flag for initial session check
   usersList: [], // For admin getUsers
   requirements: [],

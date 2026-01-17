@@ -13,6 +13,7 @@ import {
   updateStageStatus,
   assignCandidateToRequirement
 } from "../auth/authSlice";
+import { toPascalCase } from "../utils/stringUtils";
 
 /**
  * Combined CandidateApplicationUI (split UI into components inside one file)
@@ -568,7 +569,11 @@ export default function CandidateApplicationUI() {
   // FORM HANDLERS (unchanged)
   // -------------------------------
   const handleChange = (e) => {
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    let value = e.target.value;
+    if (e.target.name === "name") {
+      value = toPascalCase(value);
+    }
+    setFormData((prev) => ({ ...prev, [e.target.name]: value }));
   };
 
   const handleFileChange = (e) => {
