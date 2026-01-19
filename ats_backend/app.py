@@ -839,9 +839,20 @@ def create_user():
         # Min 8 chars, at least 1 letter, 1 number
         if len(password) < 8:
             return jsonify({"message": "Password must be at least 8 characters long"}), 400
-        if not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
-            return jsonify({"message": "Password must contain at least one letter and one number"}), 400
-
+        if (
+            not re.search(r"[A-Z]", password) or      # capital letter
+            not re.search(r"[a-z]", password) or      # small letter
+            not re.search(r"\d", password) or         # numeric
+            not re.search(r"[^A-Za-z0-9]", password)  # special character
+            ):
+            return jsonify({
+                "message": (
+                    "Password format is incomplete. "
+                    "It must contain at least one capital letter, "
+                    "one small letter, one numeric character, "
+                    "and one special character."
+                )
+    }), 400
         # Hash the password
         password_hash = hashlib.sha256(password.encode()).hexdigest()
 
