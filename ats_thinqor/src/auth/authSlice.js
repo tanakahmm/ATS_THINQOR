@@ -550,6 +550,18 @@ export const fetchReportStats = createAsyncThunk(
   }
 );
 
+export const fetchReportStageCandidates = createAsyncThunk(
+  "reports/fetchStageCandidates",
+  async ({ reqId, stageName }, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/reports/requirement/${reqId}/stage/candidates?stage_name=${encodeURIComponent(stageName)}`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch stage candidates");
+    }
+  }
+);
+
 // ------------------------------------------------------------------
 // AI CHAT
 // ------------------------------------------------------------------

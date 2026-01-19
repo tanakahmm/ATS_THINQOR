@@ -52,10 +52,13 @@ def get_requirement_stats(req_id):
 
         # Get stats from candidate_progress
         cursor.execute("""
-            SELECT stage_name, status, COUNT(*) as count 
-            FROM candidate_progress 
-            WHERE requirement_id=%s 
-            GROUP BY stage_name, status
+            SELECT cp.stage_name, cp.status, COUNT(*) as count, rs.stage_order 
+            FROM candidate_progress cp
+            LEFT JOIN requirement_stages rs ON rs.id = cp.stage_id
+            WHERE cp.requirement_id=%s 
+            AND cp.stage_name NOT IN ('Manual Review', 'Manual Assignments', 'Manual Assignment')
+            GROUP BY cp.stage_name, cp.status, rs.stage_order
+            ORDER BY rs.stage_order
         """, (req_id,))
         progress_stats = cursor.fetchall()
         
@@ -64,13 +67,18 @@ def get_requirement_stats(req_id):
         total_res = cursor.fetchone()
         total_candidates = total_res['total'] if total_res else 0
 
-        # Get selections (candidates who are hired/selected)
-        # Assuming 'COMPLETED' status in final stage or specific status indicates selection.
-        # Or maybe check for 'OFFERED' or 'HIRED' if those statuses exist.
-        # Based on `candidate_progress` table, status is ENUM('PENDING','IN_PROGRESS','COMPLETED','REJECTED').
-        # And decision is ENUM('NONE','MOVE_NEXT','HOLD','REJECT').
-        # Let's assume 'COMPLETED' in the last stage means selected, or if there's a specific "Selected" stage.
-        # For now, let's return the raw stats and let frontend visualize.
+        # Get selections (candidates who are hired/selected - Completed LAST round)
+        cursor.execute("""
+            SELECT COUNT(DISTINCT cp.candidate_id) as count
+            FROM candidate_progress cp
+            JOIN requirements r ON r.id = cp.requirement_id
+            JOIN requirement_stages rs ON rs.id = cp.stage_id
+            WHERE cp.requirement_id = %s
+              AND cp.status = 'COMPLETED'
+              AND rs.stage_order = r.no_of_rounds
+        """, (req_id,))
+        sel_res = cursor.fetchone()
+        selected_count = sel_res['count'] if sel_res else 0
 
         cursor.close()
         conn.close()
@@ -78,8 +86,37 @@ def get_requirement_stats(req_id):
         return jsonify({
             "requirement": req,
             "stats": progress_stats,
-            "total_candidates": total_candidates
+            "total_candidates": total_candidates,
+            "selected_candidates": selected_count
         }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@reports_bp.route('/api/reports/requirement/<req_id>/stage/candidates', methods=['GET'])
+def get_stage_candidates(req_id):
+    try:
+        stage_name = request.args.get('stage_name')
+        if not stage_name:
+             return jsonify({"error": "stage_name required"}), 400
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT 
+                c.id, c.name, c.email, cp.status, cp.updated_at
+            FROM candidate_progress cp
+            JOIN candidates c ON c.id = cp.candidate_id
+            WHERE cp.requirement_id=%s AND cp.stage_name=%s
+        """, (req_id, stage_name))
+        
+        candidates = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        return jsonify(candidates), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

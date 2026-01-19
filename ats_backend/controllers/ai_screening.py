@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify
 from utils.gemini import run_gemini_screening
+from utils.gemini import run_gemini_screening
 from services.ai_data_service import get_db_connection
+import pymysql.cursors
 import requests
 import json
 
@@ -23,8 +25,8 @@ def screen_candidate():
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
         
-        # PyMySQL DictCursor is already set in get_db_connection
-        cursor = conn.cursor()
+        # Use DictCursor explicitly to avoid tuple index errors
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         cursor.execute("SELECT * FROM candidates WHERE id = %s", (candidate_id,))
         candidate = cursor.fetchone()
@@ -80,7 +82,7 @@ def screen_candidate():
                 requirement["id"],
                 requirement.get("category", "IT"),
                 stage="Manual Review",
-                status="REVIEW_REQUIRED",
+                status="PENDING", # Was REVIEW_REQUIRED (invalid enum)
                 decision="NONE"
             )
             
@@ -101,7 +103,7 @@ def screen_candidate():
                 requirement["id"],
                 requirement.get("category", "IT"),
                 stage="Screening Failed", 
-                status="REVIEW_REQUIRED",  # Valid ENUM
+                status="PENDING",  # Was REVIEW_REQUIRED (invalid enum)
                 decision="HOLD"            # Valid ENUM (instead of RETRY_NEEDED)
             )
 

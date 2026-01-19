@@ -1,10 +1,17 @@
-import React, { useEffect, useState } from "react";
-import { ArrowLeft, Download, ChevronRight, BarChart2, PieChart, Users, FileText, Briefcase } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
+import React, { useEffect, useState, useMemo } from "react";
+import { ArrowLeft, Download, ChevronRight, BarChart2, PieChart, Users, FileText, Briefcase, ChevronDown } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { useDispatch, useSelector } from "react-redux";
-import { fetchReportClients, fetchReportRequirements, fetchReportStats } from "../auth/authSlice";
+import { fetchReportClients, fetchReportRequirements, fetchReportStats, fetchReportStageCandidates } from "../auth/authSlice";
 
 const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+const STATUS_COLORS = {
+    'IN_PROGRESS': '#3B82F6', // Blue
+    'COMPLETED': '#10B981',   // Emerald
+    'REJECTED': '#EF4444',    // Red
+    'PENDING': '#F59E0B',     // Amber
+    'HOLD': '#6B7280'         // Gray
+};
 
 export default function Reports() {
     const dispatch = useDispatch();
@@ -13,6 +20,12 @@ export default function Reports() {
     const [view, setView] = useState('CLIENTS'); // CLIENTS, REQUIREMENTS, STATS
     const [selectedClient, setSelectedClient] = useState(null);
     const [selectedReq, setSelectedReq] = useState(null);
+    const [selectedStage, setSelectedStage] = useState(null);
+    const [stageCandidates, setStageCandidates] = useState([]);
+    const [loadingCandidates, setLoadingCandidates] = useState(false);
+
+    // Billing State (PRESERVED)
+    const [ratePerCandidate, setRatePerCandidate] = useState(0);
 
     // Fetch Clients
     useEffect(() => {
@@ -22,8 +35,24 @@ export default function Reports() {
             dispatch(fetchReportRequirements(selectedClient.id));
         } else if (view === 'STATS' && selectedReq) {
             dispatch(fetchReportStats(selectedReq.id));
+            setSelectedStage(null); // Reset stage selection
+            setStageCandidates([]);
         }
     }, [view, selectedClient, selectedReq, dispatch]);
+
+    // Fetch candidates when stage selected
+    useEffect(() => {
+        if (selectedReq && selectedStage) {
+            setLoadingCandidates(true);
+            dispatch(fetchReportStageCandidates({ reqId: selectedReq.id, stageName: selectedStage }))
+                .unwrap()
+                .then((data) => {
+                    setStageCandidates(data);
+                    setLoadingCandidates(false);
+                })
+                .catch(() => setLoadingCandidates(false));
+        }
+    }, [selectedStage, selectedReq, dispatch]);
 
     const handleClientClick = (client) => {
         setSelectedClient(client);
@@ -56,11 +85,11 @@ export default function Reports() {
                 <div
                     key={client.id}
                     onClick={() => handleClientClick(client)}
-                    className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-100 transition cursor-pointer group"
+                    className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-100 transition cursor-pointer group"
                 >
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition">
+                            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition">
                                 <Briefcase size={24} />
                             </div>
                             <div>
@@ -80,11 +109,10 @@ export default function Reports() {
 
     const renderRequirements = () => (
         <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-                <span className="cursor-pointer hover:text-indigo-600" onClick={handleBack}>Clients</span>
-                <ChevronRight size={14} />
-                <span className="font-medium text-gray-900">{selectedClient?.name}</span>
+            <div className="flex items-center gap-2 text-sm text-gray-500 mb-4 cursor-pointer hover:text-indigo-600" onClick={handleBack}>
+                <ArrowLeft size={16} /> Back to Clients
             </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-6">Requirements for {selectedClient?.name}</h2>
 
             <div className="grid grid-cols-1 gap-4">
                 {listData.map(req => (
@@ -105,9 +133,6 @@ export default function Reports() {
                         <ChevronRight className="text-gray-300 group-hover:text-indigo-600 transition" />
                     </div>
                 ))}
-                {listData.length === 0 && !loading && (
-                    <div className="text-center py-10 text-gray-400">No requirements found for this client.</div>
-                )}
             </div>
         </div>
     );
@@ -116,30 +141,69 @@ export default function Reports() {
         if (!reportStats) return null;
         const { requirement, stats, total_candidates } = reportStats;
 
-        // Prepare chart data
-        // Group by stage_name
-        const stageMap = {};
-        stats.forEach(item => {
-            if (!stageMap[item.stage_name]) {
-                stageMap[item.stage_name] = { name: item.stage_name, count: 0 };
-            }
-            stageMap[item.stage_name].count += item.count;
-        });
-        const chartData = Object.values(stageMap);
+        // Billing Calculation
+        const totalCandidates = total_candidates || 0;
+        const totalAmount = totalCandidates * ratePerCandidate;
 
-        // Status distribution (Pending, In Progress, Completed, Rejected)
-        const statusMap = {};
+        // --- Prepare Analytics Data ---
+
+        // 1. Group by Stage Name & Order
+        const stageGroups = {};
         stats.forEach(item => {
-            if (!statusMap[item.status]) {
-                statusMap[item.status] = { name: item.status, value: 0 };
+            if (!stageGroups[item.stage_name]) {
+                stageGroups[item.stage_name] = {
+                    name: item.stage_name,
+                    order: item.stage_order || 999,
+                    total: 0,
+                    statusCounts: {}
+                };
             }
-            statusMap[item.status].value += item.count;
+            stageGroups[item.stage_name].total += item.count;
+            stageGroups[item.stage_name].statusCounts[item.status] = (stageGroups[item.stage_name].statusCounts[item.status] || 0) + item.count;
         });
-        const pieData = Object.values(statusMap);
+
+        // 2. Sort Stages by Order
+        const sortedStages = Object.values(stageGroups).sort((a, b) => a.order - b.order);
+
+        // 3. Funnel Data (Candidates per Round)
+        const funnelData = sortedStages.map(stage => ({
+            name: stage.name,
+            candidates: stage.total
+        }));
+
+        // 4. Status Distribution for Selected Stage 
+        let pieData = [];
+        if (selectedStage) {
+            const stageData = stageGroups[selectedStage];
+            if (stageData) {
+                pieData = Object.entries(stageData.statusCounts).map(([status, count]) => ({
+                    name: status,
+                    value: count
+                }));
+            }
+        } else {
+            // Overall Status Distribution
+            const overallStatus = {};
+            stats.forEach(item => {
+                overallStatus[item.status] = (overallStatus[item.status] || 0) + item.count;
+            });
+            pieData = Object.entries(overallStatus).map(([status, count]) => ({
+                name: status,
+                value: count
+            }));
+        }
+
+        // 5. KPIs
+        // Use backend provided count for rigorous "Final Round Completed" check
+        const completedCount = reportStats.selected_candidates || 0;
+        const firstStageCount = sortedStages.length > 0 ? sortedStages[0].total : 0;
+        const lastStageCount = sortedStages.length > 0 ? sortedStages[sortedStages.length - 1].total : 0;
+        const dropOffRate = firstStageCount > 0 ? Math.round(((firstStageCount - lastStageCount) / firstStageCount) * 100) : 0;
 
         return (
-            <div className="space-y-8">
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+            <div className="space-y-8 animate-fade-in">
+                {/* Navigation Breadcrumb */}
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
                     <span className="cursor-pointer hover:text-indigo-600" onClick={() => { setView('CLIENTS'); setSelectedClient(null); }}>Clients</span>
                     <ChevronRight size={14} />
                     <span className="cursor-pointer hover:text-indigo-600" onClick={handleBack}>{selectedClient?.name}</span>
@@ -147,44 +211,102 @@ export default function Reports() {
                     <span className="font-medium text-gray-900">{requirement.title}</span>
                 </div>
 
-                {/* KPI Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                {/* Top KPI Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="text-gray-500 text-sm font-medium">Total Candidates</div>
                         <div className="text-3xl font-bold mt-2 text-gray-900">{total_candidates}</div>
                     </div>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="text-gray-500 text-sm font-medium">Rounds</div>
-                        <div className="text-3xl font-bold mt-2 text-indigo-600">{requirement.no_of_rounds}</div>
+                        <div className="text-3xl font-bold mt-2 text-indigo-600">{sortedStages.length}</div>
+                        <p className="text-xs text-gray-400 mt-1">{requirement.no_of_rounds} defined</p>
                     </div>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <div className="text-gray-500 text-sm font-medium">Status</div>
-                        <div className="text-3xl font-bold mt-2 text-gray-900">{requirement.status}</div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="text-gray-500 text-sm font-medium">Hired / Selected</div>
+                        <div className="text-3xl font-bold mt-2 text-emerald-600">{completedCount}</div>
+                    </div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="text-gray-500 text-sm font-medium">Overall Drop-off</div>
+                        <div className="text-3xl font-bold mt-2 text-red-500">{dropOffRate}%</div>
+                        <p className="text-xs text-gray-400 mt-1">From first to last round</p>
                     </div>
                 </div>
 
-                {/* Charts */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Bar Chart: Candidates by Stage */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-semibold mb-6">Candidates by Stage</h3>
+                {/* Billing Summary (PRESERVED) */}
+                <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 billing-summary print:border print:border-gray-200">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-semibold text-indigo-900 flex items-center gap-2">
+                            Billing Summary
+                        </h3>
+                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded border border-indigo-200 print:hidden">
+                            Private / Admin Only
+                        </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+                        <div className="print:w-1/4">
+                            <p className="text-sm text-gray-600">Candidates Assigned</p>
+                            <p className="text-2xl font-bold text-gray-900">{totalCandidates}</p>
+                        </div>
+                        <div className="print:hidden">
+                            <label className="block text-sm text-gray-600 mb-1">Rate per Candidate</label>
+                            <input
+                                type="number"
+                                min="0"
+                                value={ratePerCandidate}
+                                onChange={(e) => setRatePerCandidate(Number(e.target.value))}
+                                className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 bg-white"
+                                placeholder="Enter rate"
+                            />
+                        </div>
+                        <div className="hidden print:block print:w-1/4">
+                            <p className="text-sm text-gray-600">Rate per Candidate</p>
+                            <p className="text-2xl font-medium text-gray-900">₹{ratePerCandidate}</p>
+                        </div>
+                        <div className="print:w-1/4">
+                            <p className="text-sm text-gray-600">Calculation</p>
+                            <p className="text-sm font-medium text-gray-700">{totalCandidates} × {ratePerCandidate}</p>
+                        </div>
+                        <div className="print:w-1/4">
+                            <p className="text-sm text-gray-600">Total Amount</p>
+                            <p className="text-3xl font-bold text-indigo-700">₹{totalAmount.toLocaleString()}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Charts Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Round Funnel Chart (Main) */}
+                    <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-semibold mb-2">Hiring Funnel</h3>
+                        <p className="text-sm text-gray-500 mb-6">Candidates active or completed in each round</p>
                         <div className="h-80">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={chartData}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <AreaChart data={funnelData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="colorCandidates" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#4F46E5" stopOpacity={0.8} />
+                                            <stop offset="95%" stopColor="#4F46E5" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
                                     <XAxis dataKey="name" />
                                     <YAxis />
-                                    <Tooltip cursor={{ fill: '#F3F4F6' }} />
-                                    <Bar dataKey="count" fill="#4F46E5" radius={[4, 4, 0, 0]} barSize={40} />
-                                </BarChart>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }} />
+                                    <Area type="monotone" dataKey="candidates" stroke="#4F46E5" fillOpacity={1} fill="url(#colorCandidates)" />
+                                </AreaChart>
                             </ResponsiveContainer>
                         </div>
                     </div>
 
-                    {/* Pie Chart: Status Distribution */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-semibold mb-6">Status Distribution</h3>
-                        <div className="h-80">
+                    {/* Status Distribution (Contextual) */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-semibold mb-2">
+                            {selectedStage ? `${selectedStage} Status` : 'Overall Status'}
+                        </h3>
+                        <p className="text-sm text-gray-500 mb-6">Distribution of outcomes</p>
+                        <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
                                 <RePieChart>
                                     <Pie
@@ -192,13 +314,12 @@ export default function Reports() {
                                         cx="50%"
                                         cy="50%"
                                         innerRadius={60}
-                                        outerRadius={100}
-                                        fill="#8884d8"
+                                        outerRadius={80}
                                         paddingAngle={5}
                                         dataKey="value"
                                     >
                                         {pieData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            <Cell key={`cell-${index}`} fill={STATUS_COLORS[entry.name] || COLORS[index % COLORS.length]} />
                                         ))}
                                     </Pie>
                                     <Tooltip />
@@ -209,40 +330,96 @@ export default function Reports() {
                     </div>
                 </div>
 
-                {/* Detailed Table */}
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="px-6 py-5 border-b border-gray-100">
-                        <h3 className="text-lg font-semibold">Detailed Stage Breakdown</h3>
+                {/* Round Drill-Down Table */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="px-6 py-5 border-b border-gray-100 bg-gray-50">
+                        <h3 className="text-lg font-semibold text-gray-800">Round Analysis</h3>
+                        <p className="text-sm text-gray-500">Select a round below to view candidate details.</p>
                     </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
-                            <thead className="bg-gray-50 text-gray-500">
-                                <tr>
-                                    <th className="px-6 py-3 font-medium">Stage</th>
-                                    <th className="px-6 py-3 font-medium">Status</th>
-                                    <th className="px-6 py-3 font-medium">Count</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {stats.map((item, i) => (
-                                    <tr key={i} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 font-medium text-gray-900">{item.stage_name}</td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium 
-                                                ${item.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' :
-                                                    item.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                                                        'bg-blue-100 text-blue-700'}`}>
-                                                {item.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600">{item.count}</td>
-                                    </tr>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 min-h-[400px]">
+                        {/* Sidebar: Rounds List */}
+                        <div className="col-span-12 md:col-span-3 border-r border-gray-100 bg-gray-50/50">
+                            <div className="py-2">
+                                {sortedStages.map((stage) => (
+                                    <div
+                                        key={stage.name}
+                                        onClick={() => setSelectedStage(stage.name)}
+                                        className={`px-6 py-4 cursor-pointer border-l-4 transition-all hover:bg-white 
+                                            ${selectedStage === stage.name
+                                                ? 'border-indigo-600 bg-white text-indigo-700 font-medium shadow-sm'
+                                                : 'border-transparent text-gray-600'
+                                            }`}
+                                    >
+                                        <div className="flex justify-between items-center">
+                                            <span>{stage.name}</span>
+                                            <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">{stage.total}</span>
+                                        </div>
+                                    </div>
                                 ))}
-                                {stats.length === 0 && (
-                                    <tr><td colSpan={3} className="px-6 py-8 text-center text-gray-400">No data available</td></tr>
+                                {sortedStages.length === 0 && (
+                                    <div className="px-6 py-4 text-gray-400 text-sm italic">No rounds data available yet.</div>
                                 )}
-                            </tbody>
-                        </table>
+                            </div>
+                        </div>
+
+                        {/* Main Content: Candidate List */}
+                        <div className="col-span-12 md:col-span-9">
+                            {!selectedStage ? (
+                                <div className="h-full flex flex-col items-center justify-center text-gray-400 p-10">
+                                    <BarChart2 size={48} className="mb-4 text-gray-300" />
+                                    <p>Select a round from the left to view candidates.</p>
+                                </div>
+                            ) : (
+                                <div className="p-0">
+                                    {loadingCandidates ? (
+                                        <div className="p-10 flex justify-center">
+                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left text-sm">
+                                                <thead className="bg-gray-50 text-gray-500 border-b border-gray-100">
+                                                    <tr>
+                                                        <th className="px-6 py-3 font-medium">Candidate Name</th>
+                                                        <th className="px-6 py-3 font-medium">Email</th>
+                                                        <th className="px-6 py-3 font-medium">Status</th>
+                                                        <th className="px-6 py-3 font-medium">Last Updated</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {stageCandidates.map((candidate, idx) => (
+                                                        <tr key={idx} className="hover:bg-gray-50 transition">
+                                                            <td className="px-6 py-4 font-medium text-gray-900">{candidate.name}</td>
+                                                            <td className="px-6 py-4 text-gray-500">{candidate.email}</td>
+                                                            <td className="px-6 py-4">
+                                                                <span className={`px-2 py-1 rounded-full text-xs font-medium border
+                                                                    ${candidate.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                                                                        candidate.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-100' :
+                                                                            candidate.status === 'IN_PROGRESS' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                                                                                'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                                                                    {candidate.status}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-gray-400">
+                                                                {candidate.updated_at ? new Date(candidate.updated_at).toLocaleDateString() : '-'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                    {stageCandidates.length === 0 && (
+                                                        <tr>
+                                                            <td colSpan={4} className="px-6 py-10 text-center text-gray-400">
+                                                                No candidates found in this round.
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -251,8 +428,18 @@ export default function Reports() {
 
     return (
         <div className="min-h-screen bg-gray-50 pb-10">
+            <style>{`
+                @media print {
+                  header, button, .print\\:hidden { display: none !important; }
+                  body { background: white; }
+                  .billing-summary { page-break-inside: avoid; border: 1px solid #ddd; }
+                  .print\\:block { display: block !important; }
+                  .print\\:w-1\\/4 { width: 25% !important; }
+                }
+            `}</style>
+
             {/* Header */}
-            <header className="bg-white border-b sticky top-0 z-10">
+            <header className="bg-white border-b sticky top-0 z-10 print:hidden">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         {view !== 'CLIENTS' && (
@@ -261,24 +448,26 @@ export default function Reports() {
                             </button>
                         )}
                         <h1 className="text-2xl font-bold text-gray-800">
-                            {view === 'CLIENTS' ? 'Client Reports' :
+                            {view === 'CLIENTS' ? 'Reports & Analytics' :
                                 view === 'REQUIREMENTS' ? 'Client Requirements' :
                                     'Requirement Analytics'}
                         </h1>
                     </div>
-                    <button
-                        onClick={() => window.print()}
-                        className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
-                    >
-                        <Download size={18} /> Export PDF
-                    </button>
+                    {view === 'STATS' && (
+                        <button
+                            onClick={() => window.print()}
+                            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition shadow-sm"
+                        >
+                            <Download size={18} /> Export Report
+                        </button>
+                    )}
                 </div>
             </header>
 
             <main className="max-w-7xl mx-auto px-6 py-8">
                 {error && (
-                    <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-6 border border-red-100">
-                        Error: {error}
+                    <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-6 border border-red-100 flex items-center gap-2">
+                        <span>⚠️</span> Error: {error}
                     </div>
                 )}
 
