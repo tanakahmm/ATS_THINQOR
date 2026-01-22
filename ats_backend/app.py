@@ -144,6 +144,7 @@ def initialize_database():
                 ctc_range VARCHAR(100),
                 no_of_rounds INT DEFAULT 1,
                 status VARCHAR(50) DEFAULT 'OPEN',
+                amount INT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by VARCHAR(100),
                 FOREIGN KEY (client_id) REFERENCES clients(id)
@@ -158,6 +159,16 @@ def initialize_database():
                 cursor.execute("ALTER TABLE requirements ADD COLUMN no_of_rounds INT DEFAULT 1")
             except Exception as e:
                 print(f"❌ Error adding no_of_rounds: {e}")
+
+
+        # Check for no_of_rounds column in requirements
+        cursor.execute("SHOW COLUMNS FROM requirements LIKE 'amount'")
+        if not cursor.fetchone():
+            print("⚠️ Adding 'amount' column to requirements...")
+            try:
+                cursor.execute("ALTER TABLE requirements ADD COLUMN amount INT")
+            except Exception as e:
+                print(f"❌ Error adding amount for requirements: {e}")        
 
         # ---------------------------
         # REQUIREMENT_ALLOCATIONS
@@ -1406,6 +1417,14 @@ def create_requirement():
         except:
             no_of_rounds = 1
 
+        # Amount field (for billing)
+        try:
+            amount_value = float(data.get("amount", 0)) if data.get("amount") else 0
+            if amount_value < 0:
+                amount_value = 0
+        except (TypeError, ValueError):
+            amount_value = 0
+
         # Custom stage names (if provided)
         stage_names_list = data.get("stage_names", [])
         if not isinstance(stage_names_list, list):
@@ -1417,8 +1436,8 @@ def create_requirement():
         cursor.execute("""
             INSERT INTO requirements
             (id, client_id, title, description, location, skills_required, 
-             experience_required, ctc_range, no_of_rounds, status, created_by)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'OPEN',%s)
+             experience_required, ctc_range, no_of_rounds, status, created_by, amount)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'OPEN',%s,%s)
         """, (
             req_id,
             client_id_value,
@@ -1429,7 +1448,8 @@ def create_requirement():
             experience_value,
             ctc_range_value,
             no_of_rounds,
-            created_by_value
+            created_by_value,
+            amount_value
         ))
 
         # Generate Stages with custom names if provided
@@ -1476,10 +1496,11 @@ def create_requirement():
             "skills_required": skills_value,
             "experience_required": experience_value,
             "ctc_range": ctc_range_value,
+            "amount": amount_value,
             "no_of_rounds": no_of_rounds,
-            "created_by": user.get("name", "Unknown"),
-            "created_by_id": user.get("id"),
-            "created_by_role": user.get("role", "UNKNOWN"),
+            "created_by": user.get("name", "Unknown") if user else "Unknown",
+            "created_by_id": user.get("id") if user else None,
+            "created_by_role": user.get("role", "UNKNOWN") if user else "UNKNOWN",
             "created_at": str(datetime.now())
         })
 
@@ -2004,10 +2025,18 @@ def update_requirement(req_id):
 
     cursor = conn.cursor()  # non-dict cursor for update
 
+    # Handle amount field
+    try:
+        amount_value = float(data.get("amount", 0)) if data.get("amount") else 0
+        if amount_value < 0:
+            amount_value = 0
+    except (TypeError, ValueError):
+        amount_value = 0
+
     cursor.execute("""
         UPDATE requirements
         SET title=%s, location=%s, experience_required=%s,
-            skills_required=%s, ctc_range=%s, client_id=%s, status=%s, description=%s
+            skills_required=%s, ctc_range=%s, client_id=%s, status=%s, description=%s, amount=%s
         WHERE id=%s
     """, (
         data["title"],
@@ -2018,6 +2047,7 @@ def update_requirement(req_id):
         data["client_id"],
         data["status"],
         data.get("description", ""),
+        amount_value,
         req_id
     ))
 

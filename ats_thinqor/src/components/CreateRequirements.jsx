@@ -20,6 +20,7 @@ export default function CreateRequirements() {
     skills_required: "",
     experience_required: "",
     ctc_range: "",
+    amount:0,
     no_of_rounds: 1,
   });
 
@@ -48,6 +49,7 @@ export default function CreateRequirements() {
             experience_required: data.suggested_requirement.experience_required || prev.experience_required,
             ctc_range: data.suggested_requirement.ctc_range || prev.ctc_range,
             description: data.suggested_requirement.description || prev.description,
+            amount:data.amount
           }));
           alert("AI Auto-fill complete!");
         }
@@ -123,9 +125,10 @@ export default function CreateRequirements() {
       return;
     }
 
-    // Include stage names in payload
+    // Include stage names in payload and ensure amount is a number
     const payload = {
       ...form,
+      amount: parseFloat(form.amount) || 0,
       created_by: user?.role || "",
       stage_names: stageNames
     };
@@ -143,6 +146,7 @@ export default function CreateRequirements() {
           skills_required: "",
           experience_required: "",
           ctc_range: "",
+          amount:0,
           no_of_rounds: 1,
         });
         setStageNames(["Round 1"]);
@@ -245,6 +249,18 @@ export default function CreateRequirements() {
           required
         />
 
+        <input 
+          name="amount"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Amount per person"
+          value={form.amount || ""}
+          onChange={handleChange}
+          className="border p-2 rounded"
+          required
+        />
+        
         <input
           name="no_of_rounds"
           type="number"

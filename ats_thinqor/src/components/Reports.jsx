@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, Download, ChevronRight, BarChart2, PieChart, Users, FileText, Briefcase, ChevronDown } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { useDispatch, useSelector } from "react-redux";
-import { fetchReportClients, fetchReportRequirements, fetchReportStats, fetchReportStageCandidates } from "../auth/authSlice";
+import { fetchReportClients, fetchReportRequirements, fetchReportStats, fetchReportStageCandidates,fetchRecentRequirements } from "../auth/authSlice";
 
 const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 const STATUS_COLORS = {
@@ -53,6 +53,13 @@ export default function Reports() {
                 .catch(() => setLoadingCandidates(false));
         }
     }, [selectedStage, selectedReq, dispatch]);
+
+
+    useEffect(() => {
+    if (reportStats?.requirement?.amount) {
+        setRatePerCandidate(reportStats.requirement.amount);
+    }
+    }, [reportStats]);
 
     const handleClientClick = (client) => {
         setSelectedClient(client);

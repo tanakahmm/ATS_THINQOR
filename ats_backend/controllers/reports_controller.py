@@ -41,8 +41,8 @@ def get_requirement_stats(req_id):
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True)
         
-        # Get requirement details
-        cursor.execute("SELECT title, no_of_rounds, status FROM requirements WHERE id=%s", (req_id,))
+        # Get requirement details (including amount for billing)
+        cursor.execute("SELECT title, no_of_rounds, status, amount FROM requirements WHERE id=%s", (req_id,))
         req = cursor.fetchone()
         
         if not req:
